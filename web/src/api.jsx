@@ -32,6 +32,18 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    // Demo shortcut: ?demo=citizen|authority auto-logs-in a seeded account.
+    const demo = new URLSearchParams(location.search).get("demo");
+    if (demo && !getToken()) {
+      try {
+        const creds = demo === "authority"
+          ? { email: "authority@chennai.gov.in", password: "authority123" }
+          : { email: "alex@example.com", password: "citizen123" };
+        const d = await api("/auth/login", { method: "POST", body: creds, auth: false });
+        setToken(d.token);
+        history.replaceState(null, "", location.pathname);
+      } catch {}
+    }
     if (!getToken()) { setUser(null); setLoading(false); return; }
     try { setUser(await api("/auth/me")); }
     catch { setToken(null); setUser(null); }
