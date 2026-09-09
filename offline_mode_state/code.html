@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "on-primary-fixed-variant": "#004493",
+                        "background": "#f8f9fa",
+                        "surface-container-high": "#e7e8e9",
+                        "on-tertiary-fixed": "#410001",
+                        "secondary": "#006e28",
+                        "tertiary-fixed-dim": "#ffb4aa",
+                        "on-secondary-container": "#00732a",
+                        "surface-container": "#edeeef",
+                        "surface-bright": "#f8f9fa",
+                        "on-tertiary-fixed-variant": "#930005",
+                        "outline": "#717786",
+                        "surface-tint": "#005bc1",
+                        "surface-container-low": "#f3f4f5",
+                        "secondary-fixed-dim": "#53e16f",
+                        "inverse-on-surface": "#f0f1f2",
+                        "outline-variant": "#c1c6d7",
+                        "on-tertiary-container": "#fffbff",
+                        "on-tertiary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "primary-container": "#0070eb",
+                        "surface-variant": "#e1e3e4",
+                        "error": "#ba1a1a",
+                        "inverse-surface": "#2e3132",
+                        "on-background": "#191c1d",
+                        "on-primary-container": "#fefcff",
+                        "on-surface": "#191c1d",
+                        "tertiary": "#bc000a",
+                        "secondary-fixed": "#72fe88",
+                        "on-error": "#ffffff",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary-fixed": "#002107",
+                        "on-secondary-fixed-variant": "#00531c",
+                        "error-container": "#ffdad6",
+                        "secondary-container": "#6ffb85",
+                        "on-surface-variant": "#414755",
+                        "primary-fixed": "#d8e2ff",
+                        "primary": "#0058bc",
+                        "tertiary-fixed": "#ffdad5",
+                        "inverse-primary": "#adc6ff",
+                        "surface-container-highest": "#e1e3e4",
+                        "tertiary-container": "#e2241f",
+                        "on-primary-fixed": "#001a41",
+                        "surface-dim": "#d9dadb",
+                        "surface": "#f8f9fa"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "1rem",
+                        "lg": "2rem",
+                        "xl": "3rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .grayscale-filter {
+            filter: grayscale(100%) contrast(90%) brightness(1.1);
+        }
+        .glass-amber {
+            background: rgba(251, 191, 36, 0.15);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+        }
+        .offline-mesh {
+            background-image: radial-gradient(at 0% 0%, #f3f4f5 0%, transparent 50%),
+                              radial-gradient(at 100% 0%, #e1e3e4 0%, transparent 50%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface font-body offline-mesh min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-xl flex justify-between items-center w-full px-6 py-4 shadow-sm shadow-blue-900/5">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center overflow-hidden">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="professional portrait of a user for their digital civic profile with soft lighting and neutral background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCLtN2mrw0x_zvMzIJ8mCXWKOcZRJn8KQPt0ebnPepwKWGuma2eYQsWmUkXzrfcr8UHrrks6nQkA13R2nDoxm3_NPdYyjH_QicU3Ep0-niSVy3pKSx-3U4aNv9w8aTWWLsq6km6sXpS7ntVud2D_saH8lkIxxSw5HOTbBJeL0z7cweIJgULciSV7X5VsTSQcE8aj3liHJb_pNXB4eFOVsk0Qt9Z3_er6JJd8JjRoOuCht1T_R-leTs_fzddMGem97Z1VP1CeF0KudI"/>
+</div>
+<h1 class="text-2xl font-black bg-gradient-to-br from-blue-700 to-blue-500 bg-clip-text text-transparent font-headline tracking-tight">CivicAI</h1>
+</div>
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-slate-500">notifications</span>
+</div>
+</header>
+<!-- Offline Banner -->
+<div class="pt-20">
+<div class="glass-amber mx-4 mt-4 rounded-lg p-4 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="bg-amber-500/20 p-2 rounded-full">
+<span class="material-symbols-outlined text-amber-600">cloud_off</span>
+</div>
+<div>
+<h2 class="text-amber-900 font-headline font-bold text-sm tracking-tight">Offline Mode Active</h2>
+<p class="text-amber-800/80 text-xs font-medium">Your reports will sync once you are back online.</p>
+</div>
+</div>
+<div class="flex items-center gap-2 px-3 py-1 bg-amber-500/10 rounded-full">
+<span class="material-symbols-outlined text-amber-600 text-sm">sync</span>
+<span class="text-[10px] font-black text-amber-700 uppercase tracking-tighter">In Sync</span>
+</div>
+</div>
+</div>
+<!-- Main Content Canvas -->
+<main class="px-6 mt-8 space-y-12">
+<!-- Dashboard Hero Section -->
+<section class="relative">
+<div class="max-w-lg">
+<h3 class="text-5xl font-headline font-bold text-on-surface leading-tight tracking-tighter mb-4">
+                    Local <br/><span class="text-primary/40 italic">Snapshot</span>
+</h3>
+<p class="text-on-surface-variant font-medium text-lg leading-relaxed">
+                    Browsing cached data from your last session. High-precision features are limited until connectivity is restored.
+                </p>
+</div>
+</section>
+<!-- Bento Grid: Local Content -->
+<section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Large Card: Recent Reports (Grayscale) -->
+<div class="md:col-span-1 bg-surface-container-low rounded-xl p-8 flex flex-col justify-between min-h-[300px] relative overflow-hidden">
+<div class="relative z-10">
+<span class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-2 block">Cached Report</span>
+<h4 class="text-2xl font-headline font-bold text-on-surface mb-4">Street Lighting Initiative</h4>
+<p class="text-on-surface-variant text-sm leading-relaxed max-w-[200px]">Detailed audit of the North District lighting grid completed 2h ago.</p>
+</div>
+<div class="absolute right-0 bottom-0 w-1/2 h-full grayscale-filter opacity-40">
+<img class="w-full h-full object-cover rounded-tl-[3rem]" data-alt="dramatic perspective of modern street lamps against a fading dusk sky in black and white tones" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAqSRPzXlmcjFyxHQX71vcKmXsnUE9xCP9NMMMszUN334TFFHJtQtCB2egLwT8uEwbw3_-rpJYG5QnYmP5hm__qm_psqzWiet-S-BJB83YfgxQMVccsYfJ_BlQf6gfNK64awoUJDIfWNguP1MNwIGByCwZIWptS-BTXqeTDtq5SNR49uuR_VIZLd74B_zMGBKhAmbSTbps7hsHTjnooGbm2ZC1ooV-YMp5wBMCpxfkCpJGQ4xld2Q-BxobmbM4SFwrDuV7GtEu4QNs"/>
+</div>
+<div class="mt-8">
+<button class="bg-surface-container-highest px-6 py-3 rounded-full text-xs font-bold text-slate-500 uppercase tracking-widest">View Details</button>
+</div>
+</div>
+<!-- Small Card 1: My Stats -->
+<div class="bg-surface-container-highest rounded-lg p-8 space-y-4">
+<div class="flex justify-between items-start">
+<div class="p-3 bg-white rounded-2xl shadow-sm">
+<span class="material-symbols-outlined text-primary">assessment</span>
+</div>
+<span class="text-[10px] font-bold text-primary px-2 py-1 bg-primary/10 rounded-md">LOCAL</span>
+</div>
+<div>
+<div class="text-4xl font-headline font-black text-on-surface">12</div>
+<div class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Pending Syncs</div>
+</div>
+</div>
+<!-- Small Card 2: Local Map Placeholder -->
+<div class="bg-white rounded-lg p-6 flex flex-col justify-center items-center text-center space-y-4 shadow-sm">
+<div class="w-full h-32 rounded-xl grayscale-filter overflow-hidden bg-slate-100 relative">
+<img class="w-full h-full object-cover opacity-50" data-alt="abstract city map with minimalist lines and grayscale aesthetic representing offline navigation data" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDLIrC8xcK7fUm8yXWosWOJocg7IphoZcpUc8cJZIlr5qESUgLTnf1Zyx5pNrirLLNbPUBLoMEKDW86qbTBZe6cjM96n9EahdU851h3ymDReQZLUeVr8oK40b9_yq0JNSY3Pp9xpkdF7NDghBhbykXglnc92aquY9IF13-YBm-Pr31QzdIeMSMQ_ME84YSJV9yZm3cxN1uwfHEFppiyWKDykrdrcx_n-yBV-uURiZjZ7PUrrTAgD1lb6usNC7SScdGgG68nrvo2Isk"/>
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-slate-400 text-4xl">location_off</span>
+</div>
+</div>
+<h5 class="text-xs font-bold text-on-surface uppercase tracking-widest">Offline Maps</h5>
+</div>
+<!-- Wide Card: Community Activity -->
+<div class="md:col-span-2 bg-surface-container-low rounded-xl p-10 flex flex-col md:flex-row items-center gap-10">
+<div class="flex-1">
+<h4 class="text-3xl font-headline font-bold text-on-surface mb-4 tracking-tight">Active Proposals</h4>
+<div class="space-y-4">
+<div class="flex items-center gap-4 p-4 bg-white/50 rounded-2xl">
+<div class="w-12 h-12 rounded-xl bg-slate-200 grayscale-filter overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="neighborhood park entrance with modern wooden benches and lush greenery in grayscale" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDeGN0I1OrRfD5-PL2bg3id0vyso44jAQyzmWFhqrh4cIWKQEfkijDFUcIIrP9gzTUtFYcx9ho4pF-Iy1ySzWzrmbVeWW4sBe_KPQTlqs9jsFCYNmYVNXEBuN5fDJnLt4YUSTgvOqaZ3dPQswxm0TCPIRY6gnuR1EtRoqftAR5UvaSawiDUb24FJ5-xqeVJeUyFWLYoGYaiAHNfFKDZ4-40V9yivcyq9RR4r-K7YC3FI5-Iv74iRUsw95lcvgCgd_bQZjCE41LHZxQ"/>
+</div>
+<div>
+<div class="text-sm font-bold text-on-surface">Central Park Renovation</div>
+<div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Last Update: Yesterday</div>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 bg-white/50 rounded-2xl opacity-60">
+<div class="w-12 h-12 rounded-xl bg-slate-200 grayscale-filter overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="community garden with raised beds and vibrant textures desaturated to grayscale" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAeFNaQRxAdm1BLdNqYBjM-Y4a7XzgcCRlIzI6s25944eAmq3dGYKqzTEbArrQmc2CectQ4cZZjyrSvebmULSjtpiabjlQGVAWgZXKCD0APBzzw73y2D-h3NIuusIMszR94q3zWu-SI0Caoz1rUcZV0dkswXx1F3vTHa_gQManRAFfveaJFdLQ-hL3vS1mBr_jynusnAtLnI9vRRD2CH8SmLuOzntPgP_VzKKXVuph_elfxmYTvE361YzMnvMXdbx1FWXud2ej9pqg"/>
+</div>
+<div>
+<div class="text-sm font-bold text-on-surface">Community Garden Exp.</div>
+<div class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Last Update: 3 days ago</div>
+</div>
+</div>
+</div>
+</div>
+<div class="w-full md:w-1/3 p-8 bg-gradient-to-br from-primary to-primary-container rounded-full text-center aspect-square flex flex-col justify-center items-center">
+<span class="material-symbols-outlined text-white text-5xl mb-2">add_task</span>
+<span class="text-white font-headline font-bold text-sm">New Local Report</span>
+</div>
+</div>
+</section>
+</main>
+<!-- FAB (Suppressed on details, shown here for quick action even offline) -->
+<button class="fixed bottom-28 right-6 w-16 h-16 rounded-full bg-white/60 backdrop-blur-xl shadow-2xl flex items-center justify-center text-primary group active:scale-90 transition-all border border-white/20">
+<span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 0;">edit_square</span>
+</button>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-8 pt-4 bg-white/60 backdrop-blur-2xl rounded-t-[3rem] shadow-[0_-10px_40px_rgba(0,0,0,0.04)]">
+<div class="flex flex-col items-center justify-center text-blue-600 scale-110">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Home</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 hover:text-blue-500 transition-all">
+<span class="material-symbols-outlined">map</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Map</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 hover:text-blue-500 transition-all">
+<span class="material-symbols-outlined text-3xl">add_circle</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Report</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 hover:text-blue-500 transition-all">
+<span class="material-symbols-outlined">chat_bubble</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Chat</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 hover:text-blue-500 transition-all">
+<span class="material-symbols-outlined">person</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Profile</span>
+</div>
+</nav>
+</body></html>

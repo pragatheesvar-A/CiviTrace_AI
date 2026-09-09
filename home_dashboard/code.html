@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CivicAI - Home Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary": "#ffffff",
+                    "on-error-container": "#93000a",
+                    "on-primary-fixed-variant": "#004493",
+                    "background": "#f8f9fa",
+                    "surface-container-high": "#e7e8e9",
+                    "on-tertiary-fixed": "#410001",
+                    "secondary": "#006e28",
+                    "tertiary-fixed-dim": "#ffb4aa",
+                    "on-secondary-container": "#00732a",
+                    "surface-container": "#edeeef",
+                    "surface-bright": "#f8f9fa",
+                    "on-tertiary-fixed-variant": "#930005",
+                    "outline": "#717786",
+                    "surface-tint": "#005bc1",
+                    "surface-container-low": "#f3f4f5",
+                    "secondary-fixed-dim": "#53e16f",
+                    "inverse-on-surface": "#f0f1f2",
+                    "outline-variant": "#c1c6d7",
+                    "on-tertiary-container": "#fffbff",
+                    "on-tertiary": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "primary-container": "#0070eb",
+                    "surface-variant": "#e1e3e4",
+                    "error": "#ba1a1a",
+                    "inverse-surface": "#2e3132",
+                    "on-background": "#191c1d",
+                    "on-primary-container": "#fefcff",
+                    "on-surface": "#191c1d",
+                    "tertiary": "#bc000a",
+                    "secondary-fixed": "#72fe88",
+                    "on-error": "#ffffff",
+                    "primary-fixed-dim": "#adc6ff",
+                    "surface-container-lowest": "#ffffff",
+                    "on-secondary-fixed": "#002107",
+                    "on-secondary-fixed-variant": "#00531c",
+                    "error-container": "#ffdad6",
+                    "secondary-container": "#6ffb85",
+                    "on-surface-variant": "#414755",
+                    "primary-fixed": "#d8e2ff",
+                    "primary": "#0058bc",
+                    "tertiary-fixed": "#ffdad5",
+                    "inverse-primary": "#adc6ff",
+                    "surface-container-highest": "#e1e3e4",
+                    "tertiary-container": "#e2241f",
+                    "on-primary-fixed": "#001a41",
+                    "surface-dim": "#d9dadb",
+                    "surface": "#f8f9fa"
+            },
+            "borderRadius": {
+                    "DEFAULT": "1rem",
+                    "lg": "2rem",
+                    "xl": "3rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Space Grotesk"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 right-0 z-50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl shadow-sm shadow-blue-900/5 px-6 py-4 flex justify-between items-center w-full">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden border-2 border-primary/20">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="professional portrait of a young man with a friendly expression in soft natural lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBd48JGc-Aqkx4NjMkK4TlF_P9oD-aro0NlcAkqZNxcPnPPhQ4AYAAwjEBcbR7f7cNO7a7VP_O4VfOznrEbtLjzDaCD419v1X1HyC3ho0-BXa5kVcyEt_DNPh3DRXqT4Jn1gOJ2sQVdpyTWJB2a5zr6EpASGZasJC6WdIUEImx0RrugqD4sXRPOO5p6SPlzMWfuGe0TZg9cYT6xTYa0twoOM6uBOn1ozwK8RMK6PbT9ESAAF6gBdrm-8eesj07NQZ_eQrhKXEP2uHs"/>
+</div>
+<span class="text-2xl font-black bg-gradient-to-br from-blue-700 to-blue-500 bg-clip-text text-transparent font-space-grotesk tracking-tight">CivicAI</span>
+</div>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:opacity-80 transition-opacity text-blue-600 dark:text-blue-400">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</header>
+<main class="mt-24 px-6 space-y-10">
+<!-- Greeting & Intro -->
+<section class="max-w-2xl">
+<h1 class="text-5xl font-bold tracking-tight text-on-surface leading-tight">Hi, Alex 👋</h1>
+<p class="text-on-surface-variant mt-2 text-lg font-medium opacity-70">Your city is active today. What's on your mind?</p>
+</section>
+<!-- Search Bar -->
+<section class="relative group">
+<div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-outline">
+<span class="material-symbols-outlined">search</span>
+</div>
+<input class="w-full bg-surface-variant/50 border-none rounded-lg py-5 pl-14 pr-6 focus:ring-2 focus:ring-primary focus:bg-primary-fixed transition-all placeholder:text-outline-variant text-lg" placeholder="Search issues or locations..." type="text"/>
+</section>
+<!-- Quick Action Bento Grid -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<!-- Report Issue -->
+<div class="col-span-1 p-6 bg-primary rounded-xl flex flex-col justify-between h-48 shadow-lg shadow-primary/10 hover:scale-[0.98] transition-transform">
+<div class="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">add_circle</span>
+</div>
+<span class="text-white font-bold text-xl leading-none">Report Issue</span>
+</div>
+<!-- View Map -->
+<div class="col-span-1 p-6 glass-panel rounded-xl flex flex-col justify-between h-48 border border-white/40 hover:scale-[0.98] transition-transform">
+<div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">map</span>
+</div>
+<span class="text-on-surface font-bold text-xl leading-none">View Map</span>
+</div>
+<!-- AI Assistant -->
+<div class="col-span-2 p-6 bg-gradient-to-br from-primary to-primary-container rounded-xl flex flex-col justify-between h-48 shadow-xl shadow-primary/20 hover:scale-[0.98] transition-transform relative overflow-hidden">
+<div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mt-10 blur-2xl"></div>
+<div class="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+</div>
+<div>
+<span class="text-white font-bold text-xl block">AI Assistant</span>
+<span class="text-white/70 text-sm font-medium">Ask about city services</span>
+</div>
+</div>
+<!-- Emergency - Full Width on small, fits grid on larger -->
+<div class="col-span-2 p-6 bg-error rounded-xl flex items-center justify-between shadow-lg shadow-error/10 hover:scale-[0.98] transition-transform">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">emergency</span>
+</div>
+<span class="text-white font-bold text-xl">Emergency Help</span>
+</div>
+<span class="material-symbols-outlined text-white">chevron_right</span>
+</div>
+</section>
+<!-- Nearby Issues -->
+<section class="space-y-6">
+<div class="flex justify-between items-end">
+<h2 class="text-2xl font-bold tracking-tight">Nearby Issues</h2>
+<button class="text-primary font-bold text-sm">View All</button>
+</div>
+<div class="flex gap-6 overflow-x-auto pb-6 scrollbar-hide -mx-6 px-6">
+<!-- Card 1 -->
+<div class="min-w-[280px] bg-surface-container-low rounded-lg p-5 flex flex-col gap-4">
+<div class="relative h-40 rounded-lg overflow-hidden">
+<img alt="Pothole" class="w-full h-full object-cover" data-alt="pothole on a wet urban street with city lights reflecting in the puddles at dusk" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCn41CIUP2L1zYhcUXegJxIE_epe_alz11fIB4Pn1moNOpuNeG_mFwguBCAt4_pKWPEEnDfx649SgZZ94CJ3vgc6-ouVUQVopwYJEhxQIVsIJ2aq3QmC_-2r4KdTIyXvilSWFhZb_neeEVmRPdB_iMNH72zPF-UYuqixrSPxQ8V5Jf8bjCTjq_iHXaI0BHR84vf5Z74PSGBa2XeEO_WU7LG3rj1-4rwpZhsNfexn1bpl6AfLWgQaWTch2i_jv-oyGlZ31O0xNapxPM"/>
+<div class="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-primary tracking-widest uppercase">
+                            In Progress
+                        </div>
+</div>
+<div>
+<h3 class="font-bold text-lg leading-tight">Pothole on Main St.</h3>
+<p class="text-on-surface-variant text-sm mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">location_on</span>
+                            200m away
+                        </p>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="min-w-[280px] bg-surface-container-low rounded-lg p-5 flex flex-col gap-4">
+<div class="relative h-40 rounded-lg overflow-hidden">
+<img alt="Street Light" class="w-full h-full object-cover" data-alt="broken street light in an urban neighborhood during a misty evening" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCRdLakvTFfhBjlMT2ee124JRc8z_icTpgYKLwzth0h6Au58wbktsY1iBb2Jn479J5ugWgxHPxO3iqGvEQBySmEmaXO8OCpIDSwUhVsyvil9JP5DTpu9279l75OgzqCJKwWHsmEP3JiC0Tpg6s0Q2ZK4DPsjd4lJI9iumLqEa4bB8GVPyl7XtpcaB4mXDx7yXSF8Hyy4okoaTR4ROZdIboV11fZslaHsBxm3Y-zxqdt4g1Tsr3syoRy8ShOeSSza5CHsh0iGX6ZoLo"/>
+<div class="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-on-surface-variant tracking-widest uppercase">
+                            Reported
+                        </div>
+</div>
+<div>
+<h3 class="font-bold text-lg leading-tight">Damaged Street Lamp</h3>
+<p class="text-on-surface-variant text-sm mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">location_on</span>
+                            450m away
+                        </p>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="min-w-[280px] bg-surface-container-low rounded-lg p-5 flex flex-col gap-4">
+<div class="relative h-40 rounded-lg overflow-hidden">
+<img alt="Sanitation" class="w-full h-full object-cover" data-alt="overflowing trash bin in a city park with colorful fallen leaves around it" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDYtzlg8axHUcSjSSf3DCfkrcdjdlu_On2Wehh7jDk-tk6sWWfUd5TG-lozg4Ov4Kp_USIgL8cSrhycEw8tLPnATa_IBuC5wLmz_AoEJr6SIs3mur7AClfop1uyW8tB9yTX9AOhHD4CpXXfSCSvj0jTAb4JC_32znnhaQKmZh89cpefaYdJ0JGPBHYhWFszeCJ3bf9yrZcKiGsD1FRxlou7xh8YCeN3UM_F9DCTdqDrKBBhLzIU95_y0e_RL-LSgAci5oIF4dtXF_0"/>
+<div class="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-primary tracking-widest uppercase">
+                            Assigned
+                        </div>
+</div>
+<div>
+<h3 class="font-bold text-lg leading-tight">Park Cleanup Needed</h3>
+<p class="text-on-surface-variant text-sm mt-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">location_on</span>
+                            800m away
+                        </p>
+</div>
+</div>
+</div>
+</section>
+<!-- Resolved Issues -->
+<section class="space-y-6">
+<h2 class="text-2xl font-bold tracking-tight">Resolved Recently</h2>
+<div class="grid grid-cols-1 gap-4">
+<div class="bg-secondary/5 rounded-lg p-6 flex items-center gap-5 border border-secondary/10">
+<div class="w-16 h-16 rounded-full bg-secondary-container flex items-center justify-center text-secondary-fixed-variant flex-shrink-0">
+<span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="flex-1">
+<span class="text-[10px] font-bold text-secondary uppercase tracking-widest block mb-1">Fixed 2 hours ago</span>
+<h3 class="font-bold text-lg">Graffiti Removed: Central Plaza</h3>
+<p class="text-on-surface-variant text-sm">Our maintenance crew finished the cleaning ahead of schedule.</p>
+</div>
+</div>
+<div class="bg-secondary/5 rounded-lg p-6 flex items-center gap-5 border border-secondary/10">
+<div class="w-16 h-16 rounded-full bg-secondary-container flex items-center justify-center text-secondary-fixed-variant flex-shrink-0">
+<span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">task_alt</span>
+</div>
+<div class="flex-1">
+<span class="text-[10px] font-bold text-secondary uppercase tracking-widest block mb-1">Resolved yesterday</span>
+<h3 class="font-bold text-lg">Water Leak: Elm Street</h3>
+<p class="text-on-surface-variant text-sm">The main pipe has been secured and normal pressure is restored.</p>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-8 pt-4 bg-white/60 dark:bg-slate-900/60 backdrop-blur-2xl shadow-[0_-10px_40px_rgba(0,0,0,0.04)] rounded-t-xl">
+<div class="flex flex-col items-center justify-center text-blue-600 dark:text-blue-400 scale-110 transition-all font-inter text-[10px] font-semibold uppercase tracking-widest tap-highlight-none active:scale-90">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="mt-1">Home</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all font-inter text-[10px] font-semibold uppercase tracking-widest tap-highlight-none active:scale-90">
+<span class="material-symbols-outlined">map</span>
+<span class="mt-1">Map</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all font-inter text-[10px] font-semibold uppercase tracking-widest tap-highlight-none active:scale-90">
+<span class="material-symbols-outlined text-4xl text-primary">add_circle</span>
+<span class="mt-1">Report</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all font-inter text-[10px] font-semibold uppercase tracking-widest tap-highlight-none active:scale-90">
+<span class="material-symbols-outlined">chat_bubble</span>
+<span class="mt-1">Chat</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all font-inter text-[10px] font-semibold uppercase tracking-widest tap-highlight-none active:scale-90">
+<span class="material-symbols-outlined">person</span>
+<span class="mt-1">Profile</span>
+</div>
+</nav>
+</body></html>

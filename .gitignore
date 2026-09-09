@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+backend/civicpulse.db
+backend/server.log
+uploads/*
+!uploads/.gitkeep
+node_modules/
+web/dist/
+frontend/
+.venv/
+.env
+
+.shots/
+web/package-lock.json

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" class="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>CivicPulse</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: "#0058bc",
+              "primary-container": "#0070eb",
+              surface: "#f8f9fa",
+              "surface-low": "#f3f4f5",
+              "surface-high": "#e1e3e4",
+              "on-surface": "#191c1d",
+              "on-variant": "#414755",
+              secondary: "#006e28",
+              error: "#ba1a1a",
+            },
+            fontFamily: {
+              headline: ["Space Grotesk", "sans-serif"],
+              body: ["Inter", "sans-serif"],
+            },
+            borderRadius: { lg: "1.5rem", xl: "2rem" },
+          },
+        },
+      };
+    </script>
+    <style>
+      body { font-family: "Inter", sans-serif; background: #f8f9fa; }
+      h1, h2, h3 { font-family: "Space Grotesk", sans-serif; }
+      .material-symbols-outlined { font-variation-settings: "FILL" 0, "wght" 400; }
+      .glass { background: rgba(255, 255, 255, 0.72); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+      .leaflet-container { border-radius: 1.5rem; }
+      ::-webkit-scrollbar { width: 0; height: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+services:
+  civicpulse:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8010:8010"
+    environment:
+      CIVICPULSE_SECRET: "change-me-in-production"
+    volumes:
+      - civicpulse-db:/data
+      - civicpulse-uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  civicpulse-db:
+  civicpulse-uploads:

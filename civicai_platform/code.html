@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800;900&amp;family=Inter:wght@100;200;300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary": "#ffffff",
+                    "on-error-container": "#93000a",
+                    "on-primary-fixed-variant": "#004493",
+                    "background": "#f8f9fa",
+                    "surface-container-high": "#e7e8e9",
+                    "on-tertiary-fixed": "#410001",
+                    "secondary": "#006e28",
+                    "tertiary-fixed-dim": "#ffb4aa",
+                    "on-secondary-container": "#00732a",
+                    "surface-container": "#edeeef",
+                    "surface-bright": "#f8f9fa",
+                    "on-tertiary-fixed-variant": "#930005",
+                    "outline": "#717786",
+                    "surface-tint": "#005bc1",
+                    "surface-container-low": "#f3f4f5",
+                    "secondary-fixed-dim": "#53e16f",
+                    "inverse-on-surface": "#f0f1f2",
+                    "outline-variant": "#c1c6d7",
+                    "on-tertiary-container": "#fffbff",
+                    "on-tertiary": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "primary-container": "#0070eb",
+                    "surface-variant": "#e1e3e4",
+                    "error": "#ba1a1a",
+                    "inverse-surface": "#2e3132",
+                    "on-background": "#191c1d",
+                    "on-primary-container": "#fefcff",
+                    "on-surface": "#191c1d",
+                    "tertiary": "#bc000a",
+                    "secondary-fixed": "#72fe88",
+                    "on-error": "#ffffff",
+                    "primary-fixed-dim": "#adc6ff",
+                    "surface-container-lowest": "#ffffff",
+                    "on-secondary-fixed": "#002107",
+                    "on-secondary-fixed-variant": "#00531c",
+                    "error-container": "#ffdad6",
+                    "secondary-container": "#6ffb85",
+                    "on-surface-variant": "#414755",
+                    "primary-fixed": "#d8e2ff",
+                    "primary": "#0058bc",
+                    "tertiary-fixed": "#ffdad5",
+                    "inverse-primary": "#adc6ff",
+                    "surface-container-highest": "#e1e3e4",
+                    "tertiary-container": "#e2241f",
+                    "on-primary-fixed": "#001a41",
+                    "surface-dim": "#d9dadb",
+                    "surface": "#f8f9fa"
+            },
+            "borderRadius": {
+                    "DEFAULT": "1rem",
+                    "lg": "2rem",
+                    "xl": "3rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Space Grotesk"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-space-grotesk { font-family: 'Space Grotesk', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+<!-- Futuristic Background Elements -->
+<div class="absolute inset-0 z-0">
+<div class="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-primary/10 rounded-full blur-[120px]"></div>
+<div class="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-secondary/5 rounded-full blur-[120px]"></div>
+<div class="absolute top-1/4 right-1/4 w-[30%] h-[30%] bg-primary-container/10 rounded-full blur-[80px]"></div>
+</div>
+<!-- Main Content Container -->
+<div class="relative z-10 w-full max-w-md">
+<!-- Branding Header -->
+<header class="mb-12 text-center">
+<h1 class="text-4xl font-black font-space-grotesk tracking-tight bg-gradient-to-br from-primary to-primary-container bg-clip-text text-transparent">
+                CivicAI
+            </h1>
+<p class="text-on-surface-variant font-medium mt-2 tracking-wide text-sm opacity-80">
+                THE DIGITAL ARCHITECT OF GOVERNANCE
+            </p>
+</header>
+<!-- Glassmorphic Login Card -->
+<main class="glass-panel p-8 md:p-10 rounded-xl shadow-2xl shadow-primary/5 border border-white/40">
+<!-- Role Toggle -->
+<div class="mb-10 bg-surface-variant/50 p-1.5 rounded-full flex items-center">
+<button class="flex-1 py-3 px-6 rounded-full bg-white text-primary text-xs font-bold tracking-widest transition-all shadow-sm">
+                    CITIZEN
+                </button>
+<button class="flex-1 py-3 px-6 rounded-full text-on-surface-variant text-xs font-bold tracking-widest hover:bg-white/30 transition-all">
+                    AUTHORITY
+                </button>
+</div>
+<!-- Login Form -->
+<form class="space-y-6">
+<div class="space-y-2">
+<label class="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant ml-2">Email Address</label>
+<div class="relative">
+<input class="w-full bg-surface-container-low border-none rounded-lg px-5 py-4 text-on-surface placeholder:text-outline-variant focus:ring-2 focus:ring-primary/20 transition-all outline-none" placeholder="name@civic.ai" type="email"/>
+</div>
+</div>
+<div class="space-y-2">
+<div class="flex justify-between items-center px-2">
+<label class="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant">Password</label>
+<a class="text-[10px] font-bold text-primary hover:opacity-70 transition-opacity" href="#">FORGOT?</a>
+</div>
+<div class="relative">
+<input class="w-full bg-surface-container-low border-none rounded-lg px-5 py-4 text-on-surface placeholder:text-outline-variant focus:ring-2 focus:ring-primary/20 transition-all outline-none" placeholder="••••••••" type="password"/>
+</div>
+</div>
+<button class="w-full bg-gradient-to-br from-primary to-primary-container text-white font-bold py-4 rounded-full shadow-lg shadow-primary/20 hover:opacity-90 active:scale-[0.98] transition-all text-sm tracking-widest" type="submit">
+                    LOGIN
+                </button>
+</form>
+<!-- Divider -->
+<div class="my-8 flex items-center gap-4">
+<div class="h-[1px] flex-1 bg-outline-variant/30"></div>
+<span class="text-[10px] font-bold text-outline-variant tracking-widest">OR CONNECT WITH</span>
+<div class="h-[1px] flex-1 bg-outline-variant/30"></div>
+</div>
+<!-- Social Logins -->
+<div class="grid grid-cols-2 gap-4">
+<button class="flex items-center justify-center gap-3 bg-white border border-outline-variant/20 py-3.5 rounded-full hover:bg-surface-container transition-all active:scale-95 shadow-sm">
+<img alt="" class="w-5 h-5" data-alt="Official Google G-Logo icon with vibrant brand colors on a clean white background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC1DB5XmNOk6u0YCiNNChWtrLXNqcpJo-kb51KEBKIINn19W61BHOBH9Lrd8PNKmqKJqGQZgbPDsUbfRXv_3D8dxayZJTdbdEcYpoq2DUMUBFvYs9g-4zJY0KhNxskI1Jy5Kr9wvlxUlpUieGnf7jQVuIQwLGgN4x-HcBg3PqTKYwc4xVwTKvQVd8Nyatk2aVFHWps_2n_0gRtPf0OxO0Ucmg2Uw7zH4Gw4ZSixkzpBtao0rWiqaDCNc2dK93zvC-aHu5fWi8IayvQ"/>
+<span class="text-xs font-bold tracking-tight text-on-surface">Google</span>
+</button>
+<button class="flex items-center justify-center gap-3 bg-white border border-outline-variant/20 py-3.5 rounded-full hover:bg-surface-container transition-all active:scale-95 shadow-sm">
+<span class="material-symbols-outlined text-xl" style="font-variation-settings: 'FILL' 1;">ios</span>
+<span class="text-xs font-bold tracking-tight text-on-surface">Apple</span>
+</button>
+</div>
+<!-- Footer Link -->
+<footer class="mt-10 text-center">
+<p class="text-sm text-on-surface-variant">
+                    New to the platform? 
+                    <a class="text-primary font-bold ml-1 hover:underline underline-offset-4 decoration-2" href="#">Create an account</a>
+</p>
+</footer>
+</main>
+<!-- Aesthetic Footer Ornament -->
+<div class="mt-12 flex justify-center items-center gap-8 opacity-40">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">verified_user</span>
+<span class="text-[10px] font-bold tracking-widest">SECURE</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">public</span>
+<span class="text-[10px] font-bold tracking-widest">GLOBAL</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">hub</span>
+<span class="text-[10px] font-bold tracking-widest">ENCRYPTED</span>
+</div>
+</div>
+</div>
+<!-- Background Illustration Overlay -->
+<div class="fixed bottom-0 left-0 w-full h-[353px] pointer-events-none opacity-20 z-0">
+<div class="absolute bottom-0 left-0 w-full h-full bg-gradient-to-t from-background to-transparent"></div>
+<img alt="" class="w-full h-full object-cover grayscale mix-blend-overlay" data-alt="Abstract architectural wireframe of a futuristic city grid with glowing lines and geometric patterns representing civic infrastructure" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAV7x5gOtikiFeNuu3_3nx2Kc3ffqK9ZQPufscscu8sS420LWDfhJviO08y4SirI5mc4HOksNKa48Bm6XYDL5JFM_VDIpBxcTnCAikfxzSDpbLIlTPfX0O_gI9GrWzBwaWI5iLDBV0tcy-ZBLdT0iwru7qQSUUTF26REsnZnonlBBmM57eOihkqE1YlqSRPYmIaWDm08sPCYtm8kma1DqaeQYtmfgThtKCfRn1aFahJQKFfmJ0nabDrbRtYwbz7tn9Z8srYXVBYC5c"/>
+</div>
+</body></html>

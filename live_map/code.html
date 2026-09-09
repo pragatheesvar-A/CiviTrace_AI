@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CivicAI - Live Map</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Inter:wght@300..700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary": "#ffffff",
+                    "on-error-container": "#93000a",
+                    "on-primary-fixed-variant": "#004493",
+                    "background": "#f8f9fa",
+                    "surface-container-high": "#e7e8e9",
+                    "on-tertiary-fixed": "#410001",
+                    "secondary": "#006e28",
+                    "tertiary-fixed-dim": "#ffb4aa",
+                    "on-secondary-container": "#00732a",
+                    "surface-container": "#edeeef",
+                    "surface-bright": "#f8f9fa",
+                    "on-tertiary-fixed-variant": "#930005",
+                    "outline": "#717786",
+                    "surface-tint": "#005bc1",
+                    "surface-container-low": "#f3f4f5",
+                    "secondary-fixed-dim": "#53e16f",
+                    "inverse-on-surface": "#f0f1f2",
+                    "outline-variant": "#c1c6d7",
+                    "on-tertiary-container": "#fffbff",
+                    "on-tertiary": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "primary-container": "#0070eb",
+                    "surface-variant": "#e1e3e4",
+                    "error": "#ba1a1a",
+                    "inverse-surface": "#2e3132",
+                    "on-background": "#191c1d",
+                    "on-primary-container": "#fefcff",
+                    "on-surface": "#191c1d",
+                    "tertiary": "#bc000a",
+                    "secondary-fixed": "#72fe88",
+                    "on-error": "#ffffff",
+                    "primary-fixed-dim": "#adc6ff",
+                    "surface-container-lowest": "#ffffff",
+                    "on-secondary-fixed": "#002107",
+                    "on-secondary-fixed-variant": "#00531c",
+                    "error-container": "#ffdad6",
+                    "secondary-container": "#6ffb85",
+                    "on-surface-variant": "#414755",
+                    "primary-fixed": "#d8e2ff",
+                    "primary": "#0058bc",
+                    "tertiary-fixed": "#ffdad5",
+                    "inverse-primary": "#adc6ff",
+                    "surface-container-highest": "#e1e3e4",
+                    "tertiary-container": "#e2241f",
+                    "on-primary-fixed": "#001a41",
+                    "surface-dim": "#d9dadb",
+                    "surface": "#f8f9fa"
+            },
+            "borderRadius": {
+                    "DEFAULT": "1rem",
+                    "lg": "2rem",
+                    "xl": "3rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": [
+                            "Space Grotesk"
+                    ],
+                    "body": [
+                            "Inter"
+                    ],
+                    "label": [
+                            "Inter"
+                    ]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; }
+        .glass-panel {
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface overflow-hidden h-screen w-screen flex flex-col">
+<!-- Top Navigation Anchor (Manual Integration for Map Layout) -->
+<header class="fixed top-0 left-0 w-full z-50 px-6 py-4 flex justify-between items-center bg-white/70 backdrop-blur-xl shadow-sm shadow-blue-900/5">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden bg-surface-container-highest">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="close-up portrait of a professional man with a friendly expression in a clean studio setting with soft lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuACcggB09pt33wUG1FkIP1gFMTCIDwvIuaBVIz5BRs5_hCFFkxz7gFQ7N61GTcu5Q3gK4Lekk8B8rnCT9Zz0tGzggNLhcM1_CyqKvtRDg5yA7nCJI3j-_1MgFQJetRil9c0XPTtNrjBQupz5Vvko8BP9vnPzSBfhqaXzzXm5nN8uDNPT25B8Bzlf1pl8pNfa2xBo7_mVTjPgdtdkzNzH0iOFR-ZtL-l3GrXCazMCqnm_qSxmmhp23fgL5yIMe5WpZx_LSag8im8lGE"/>
+</div>
+<span class="text-2xl font-black bg-gradient-to-br from-blue-700 to-blue-500 bg-clip-text text-transparent font-space-grotesk tracking-tight">CivicAI</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="w-10 h-10 flex items-center justify-center text-slate-500 hover:opacity-80 transition-opacity">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</div>
+</header>
+<!-- Full Screen Map Canvas -->
+<main class="relative flex-grow w-full h-full pt-20">
+<!-- Map Placeholder with data-location -->
+<div class="absolute inset-0 z-0 bg-surface-container-high overflow-hidden" data-location="San Francisco, California" style="">
+<img alt="Civic Map Background" class="w-full h-full object-cover opacity-60 mix-blend-multiply grayscale contrast-125" data-alt="aerial satellite view of a modern urban city layout with clean white roads and dark grey buildings in a minimalist architectural style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQBHOS9gQuLSK1GUgiNbvfohzrGbztkwLSXimxUrTRjr-EtzAl95mkIb4HMrPFN1Drg8QFEolH0wd79z4W0fFKdEfJNyZts2aKHYTrrspPgEIzF4OhzgI8AqVQZFHyBG7o2qkpoyrkHnfoPs_-MpsnREaM-tsJvL7GHwVTOMmPNJWeS6I4lT3D6wU6cIuWz5LJ0U0vMhWsvMGeHckeL4WTly1dik81EiZXy4s9-g0Lz5fcyWdx68NwrXRJ1S6TXbJvBKBIccUqanw"/>
+<!-- Custom Pins (Asymmetric Positioning) -->
+<!-- High Priority -->
+<div class="absolute top-[35%] left-[28%] group cursor-pointer">
+<div class="relative">
+<div class="absolute -inset-2 bg-red-500/20 rounded-full animate-pulse"></div>
+<div class="w-8 h-8 bg-tertiary rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+<span class="material-symbols-outlined text-white text-sm" style="font-variation-settings: 'FILL' 1;">warning</span>
+</div>
+</div>
+</div>
+<!-- Medium Priority -->
+<div class="absolute top-[48%] left-[62%] group cursor-pointer">
+<div class="w-7 h-7 bg-amber-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+<span class="material-symbols-outlined text-white text-xs" style="font-variation-settings: 'FILL' 1;">error</span>
+</div>
+</div>
+<!-- Low Priority -->
+<div class="absolute top-[22%] left-[55%] group cursor-pointer">
+<div class="w-6 h-6 bg-secondary rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+<span class="material-symbols-outlined text-white text-[10px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Another High Priority -->
+<div class="absolute top-[65%] left-[45%] group cursor-pointer">
+<div class="relative">
+<div class="absolute -inset-2 bg-red-500/20 rounded-full animate-pulse"></div>
+<div class="w-8 h-8 bg-tertiary rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+<span class="material-symbols-outlined text-white text-sm" style="font-variation-settings: 'FILL' 1;">build</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Search Bar Floating -->
+<div class="absolute top-8 left-1/2 -translate-x-1/2 w-[90%] max-w-lg z-20">
+<div class="glass-panel bg-white/70 rounded-full p-2 flex items-center shadow-xl shadow-blue-900/10">
+<div class="pl-4 pr-3 text-slate-400">
+<span class="material-symbols-outlined">search</span>
+</div>
+<input class="bg-transparent border-none focus:ring-0 w-full text-on-surface-variant font-medium placeholder:text-slate-400" placeholder="Search incidents, zones, or addresses..." type="text"/>
+<button class="bg-primary text-white p-2 rounded-full flex items-center justify-center transition-transform active:scale-90">
+<span class="material-symbols-outlined">tune</span>
+</button>
+</div>
+</div>
+<!-- Floating Action Buttons Cluster -->
+<div class="absolute right-6 top-32 flex flex-col gap-4 z-20">
+<button class="w-14 h-14 glass-panel bg-white/60 rounded-full flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">layers</span>
+</button>
+<button class="w-14 h-14 glass-panel bg-white/60 rounded-full flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-primary">local_fire_department</span>
+</button>
+<button class="w-14 h-14 bg-gradient-to-br from-primary to-primary-container rounded-full flex items-center justify-center shadow-xl shadow-primary/20 text-white hover:scale-105 active:scale-95 transition-all">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">my_location</span>
+</button>
+</div>
+<!-- Draggable Bottom Sheet Logic (Mocked Visual) -->
+<div class="absolute bottom-24 left-0 w-full z-30 px-4">
+<div class="bg-white/80 backdrop-blur-2xl rounded-t-xl shadow-[0_-20px_50px_rgba(0,0,0,0.1)] pt-3 pb-24 h-[397px] overflow-y-auto">
+<!-- Handle -->
+<div class="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6"></div>
+<div class="px-6">
+<div class="flex justify-between items-end mb-8">
+<div>
+<p class="text-xs font-bold text-primary tracking-widest uppercase mb-1">Live Feed</p>
+<h2 class="text-3xl font-black text-on-surface">Nearby Issues</h2>
+</div>
+<div class="text-right">
+<span class="text-sm font-semibold text-slate-400">Showing 12 reports</span>
+</div>
+</div>
+<div class="space-y-4">
+<!-- Issue Card 1 -->
+<div class="bg-surface-container-low p-4 rounded-lg flex gap-4 hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
+<img alt="Pothole" class="w-full h-full object-cover" data-alt="close-up view of a deep cracked pothole on an urban asphalt street during daytime" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCxR6icwFFFdqugvxzRU7u7_TPQNz4VIH2sPjs6tYbRDQJ1cyJ1fkm5isW6fhZjSxhXsHSK6ASafj9ca6SCcuXcjk28E6upEV9TltnqbuKj6tiPcF85IX3X8uDZaowUo4sh988D_RdB81c19_6vUFTZ0mMoCWgXHtPBBhKUhtJ5sKy8AtLK0YlLy5Fiw10Y9n_RTAbUWWhSKpU4KoUEVFy-vaEnqa9jl-asQuo-Qt5h5bmFMchiLhICcUA4i-tIwi9CX7LcQeef0rs"/>
+</div>
+<div class="flex-grow flex flex-col justify-between py-1">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="px-2 py-0.5 bg-red-100 text-tertiary text-[10px] font-bold rounded-full uppercase">High Priority</span>
+<span class="text-[10px] text-slate-400 font-medium">200m away</span>
+</div>
+<h3 class="text-base font-bold leading-tight">Damaged Water Main</h3>
+<p class="text-xs text-on-surface-variant truncate w-48">Significant flooding reported near the intersection...</p>
+</div>
+</div>
+<div class="flex items-center justify-center">
+<span class="material-symbols-outlined text-slate-300 group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</div>
+<!-- Issue Card 2 -->
+<div class="bg-surface-container-low p-4 rounded-lg flex gap-4 hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
+<img alt="Graffiti" class="w-full h-full object-cover" data-alt="colorful street art and graffiti on a textured brick wall in an urban alleyway" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUB-TqdOLd2yDStKxjfSTYVQ4xgW9cwuIDgsSWaJaneVyQs2LqsWvKd3YxJFnsdT7KkgAHkg1PdijBwlWdL2ZipFvEi9ZGY906KgKlIF0J2gu1jGweXpLobvdsD59bWIwZkb7w4xZJoumwcxMLkRlI6PvuECSka09waAjYsU8HJfLIjtUZlx3UO2fvejF-4N5trxledHIySEAa1_AX08Xh73m3ewTuZmsXEdyiJmI5JE1RMYTQBSJYr0v6N-V6DG_dn4putytXV80"/>
+</div>
+<div class="flex-grow flex flex-col justify-between py-1">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full uppercase">Medium</span>
+<span class="text-[10px] text-slate-400 font-medium">1.2km away</span>
+</div>
+<h3 class="text-base font-bold leading-tight">Unauthorized Street Art</h3>
+<p class="text-xs text-on-surface-variant truncate w-48">Vandalism reported on historical facade...</p>
+</div>
+</div>
+<div class="flex items-center justify-center">
+<span class="material-symbols-outlined text-slate-300 group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</div>
+<!-- Issue Card 3 -->
+<div class="bg-surface-container-low p-4 rounded-lg flex gap-4 hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
+<img alt="Street Light" class="w-full h-full object-cover" data-alt="modern industrial street light pole against a twilight blue sky with minimal clouds" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBXnPBep6TFGg4N73edisQvEsxkRmx3P5fjXxDjrdJfUSYRxo6Wk3Q5xYDWs0qFEC7TnZDtxS2kikLtzYbmgnngyFfkf_SfHJU-rPxRnY-7nOQU4ehYXZhQ5qkWvD-_wtaKaOXNIfgeipvg5kyJ5BdF_eiaoctIJ0t5eX0u5feolUmkRqLrN3DhKf8ohtHqkugcn_0wxFYizSO78JtjeVh5IZbYInhvPAz_iUEVxB8IVHHuNzrEsl85bw3Kb9NhxibPnOV7TUkSvPI"/>
+</div>
+<div class="flex-grow flex flex-col justify-between py-1">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="px-2 py-0.5 bg-green-100 text-secondary text-[10px] font-bold rounded-full uppercase">Low Priority</span>
+<span class="text-[10px] text-slate-400 font-medium">3.5km away</span>
+</div>
+<h3 class="text-base font-bold leading-tight">Blinking Street Lamp</h3>
+<p class="text-xs text-on-surface-variant truncate w-48">Minor maintenance required for light sensor...</p>
+</div>
+</div>
+<div class="flex items-center justify-center">
+<span class="material-symbols-outlined text-slate-300 group-hover:text-primary transition-colors">chevron_right</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar (Execution from JSON) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-8 pt-4 bg-white/60 dark:bg-slate-900/60 backdrop-blur-2xl rounded-t-[3rem] shadow-[0_-10px_40px_rgba(0,0,0,0.04)]">
+<!-- Home -->
+<a class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all tap-highlight-none active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Home</span>
+</a>
+<!-- Map (Active) -->
+<a class="flex flex-col items-center justify-center text-blue-600 dark:text-blue-400 scale-110 hover:text-blue-500 transition-all tap-highlight-none active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="map" style="font-variation-settings: 'FILL' 1;">map</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Map</span>
+</a>
+<!-- Report (FAB Styled Circle from JSON hints) -->
+<a class="flex flex-col items-center justify-center -mt-10" href="#">
+<div class="w-16 h-16 bg-gradient-to-br from-blue-700 to-blue-500 rounded-full flex items-center justify-center shadow-xl shadow-blue-600/30 text-white tap-highlight-none active:scale-90 transition-transform">
+<span class="material-symbols-outlined text-3xl" data-icon="add_circle" style="font-variation-settings: 'FILL' 1;">add_circle</span>
+</div>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest text-slate-400 mt-2">Report</span>
+</a>
+<!-- Chat -->
+<a class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all tap-highlight-none active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="chat_bubble">chat_bubble</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Chat</span>
+</a>
+<!-- Profile -->
+<a class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 hover:text-blue-500 transition-all tap-highlight-none active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-inter text-[10px] font-semibold uppercase tracking-widest mt-1">Profile</span>
+</a>
+</nav>
+</body></html>
