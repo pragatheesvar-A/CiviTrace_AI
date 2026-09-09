@@ -1,3 +1,4 @@
+// Converted from stitch mockup: ai_assistant_chat/
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api.jsx";

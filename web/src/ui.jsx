@@ -1,3 +1,4 @@
+// Converted from stitch mockup: offline_mode_state/ (OfflineBanner) + shared design-system primitives
 import React, { useEffect, useState } from "react";
 
 export const Icon = ({ name, className = "", fill = false }) => (

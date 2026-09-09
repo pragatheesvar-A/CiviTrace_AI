@@ -1,3 +1,4 @@
+// Converted from stitch mockup: login_signup/ + civicai_platform/
 import React, { useState } from "react";
 import { useAuth } from "../api.jsx";
 import { Icon } from "../ui.jsx";

@@ -1,3 +1,4 @@
+// Converted from stitch mockup: issue_details/
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, useAuth, fileToBase64 } from "../api.jsx";
