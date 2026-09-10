@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 
 import auth as A
-from models import Issue, RefreshToken, User, utcnow
+from models import AuditLog, Issue, RefreshToken, User, utcnow
 
 try:
     from ai.text_classifier import embed as _embed
@@ -20,6 +20,13 @@ def _emb(text: str):
         return [round(float(x), 5) for x in v] if v is not None else None
     except Exception:
         return None
+
+
+try:
+    from ai.wards import assign as _ward
+except Exception:  # pragma: no cover
+    def _ward(lat, lng):
+        return ""
 
 SEED_ISSUES = [
     ("Deep pothole cluster on Anna Salai",
@@ -97,6 +104,10 @@ async def seed(Session):
                               "checks": {"reporter_trust": 0.7, "scene_pass": 1.0 if method == "vision" else 0.5}},
                 eta_days=eta,
                 embedding=_emb(f"{title}. {desc}"),
+                evidence_trust=int(round(auth_score * 100)),
+                evidence_verdict="trusted" if auth_score >= 0.55 else "needs_human_review",
+                consistency="high" if auth_score >= 0.7 else "medium" if auth_score >= 0.5 else "low",
+                ward=_ward(lat, lng), is_public=True,
                 status="Verified" if ver else "Reported", reporter_id=rep.id,
                 upvotes=(n * 3) % 11, ward_weight=0.5,
                 created_at=utcnow() - timedelta(hours=6 * n + 2),
@@ -111,12 +122,54 @@ async def seed(Session):
                       lat=lat, lng=lng, address=addr, priority="medium", priority_score=0.45,
                       verified=True, verification_method="text", verification_confidence=0.6,
                       embedding=_emb(f"{title}. Resolved by municipal crew."),
-                      resolution_verified=True,
+                      resolution_verified=True, resolution_confidence=88,
                       resolution_note="Proof photo: scene 88% · distinct from the original — accepted.",
-                      status="Resolved", reporter_id=priya.id, upvotes=5, ward_weight=0.5,
+                      evidence_trust=74, evidence_verdict="trusted", consistency="high",
+                      ward=_ward(lat, lng), is_public=True, citizen_confirmation="fixed",
+                      status="Verified Closed", reporter_id=priya.id, upvotes=5, ward_weight=0.5,
                       created_at=utcnow() - timedelta(days=4), resolved_at=utcnow() - timedelta(days=1))
             s.add(i)
             await s.flush()
             i.cluster_id = i.id
             priya.points += 25
+
+        # --- demo scenario: "Pothole near school", awaiting citizen confirmation ---
+        demo = Issue(
+            title="Pothole near Government Girls School", category="Roads",
+            description="Deep pothole right at the school gate — children cross here every morning.",
+            lat=13.0619, lng=80.2471, address="School Rd, near Govt Girls School, Thousand Lights",
+            priority="critical", priority_score=0.93, verified=True, verification_method="vision",
+            verification_confidence=0.9, detection_count=2, severity=0.11,
+            verification_note="Stage 1 road-scene 92% -> Stage 2 detected 2 pothole(s) @ 90%. "
+                              "Near a school -> priority raised by the fairness layer.",
+            evidence=[{"stage": "seed", "note": "demo scenario"}],
+            model_version="clip-vitb32/yolov8m-pothole/minilm-l6-v2/open-meteo @ pipeline-v3",
+            authenticity_score=0.9, authenticity={"score": 0.9, "label": "authentic", "flags": [], "checks": {}},
+            evidence_trust=90, evidence_verdict="trusted", consistency="high",
+            resolution_confidence=86, resolution_verified=True, awaiting_confirmation=True,
+            resolution_note="AFTER evidence is consistent with the pothole being filled "
+                            "(detections 2 → 0, distinct frame, same location).",
+            eta_days=1.5, ward=_ward(13.0619, 80.2471), is_public=True,
+            embedding=_emb("Pothole near Government Girls School deep pothole school gate children"),
+            status="AI Verified — Awaiting Confirmation", reporter_id=alex.id, upvotes=9,
+            ward_weight=0.7, created_at=utcnow() - timedelta(days=3),
+            photo_url=None, after_photo_url=None)
+        s.add(demo); await s.flush(); demo.cluster_id = demo.id
+        alex.points += 20
+        s.add(AuditLog(actor_id=alex.id, actor_role="citizen", action="issue.create",
+                       target=f"issue:{demo.id}", summary="Citizen filed 'Pothole near Government Girls School'",
+                       reason="photo + description + GPS submitted"))
+        s.add(AuditLog(actor_role="ai", action="ai.evidence_analyzed", target=f"issue:{demo.id}",
+                       summary="Evidence Trust 90/100 · high consistency · trusted",
+                       reason="no conflicting signals detected"))
+        s.add(AuditLog(actor_role="ai", action="ai.priority_set", target=f"issue:{demo.id}",
+                       summary="Priority set to critical (93/100)",
+                       reason="near a school / hospital / crowded place -> at least high; "
+                              "2+ confident vision detections -> high"))
+        s.add(AuditLog(actor_id=authority.id, actor_role="authority", action="issue.status",
+                       target=f"issue:{demo.id}", summary="Status changed: Verified → In Progress",
+                       reason="crew dispatched"))
+        s.add(AuditLog(actor_role="ai", action="ai.resolution_verified", target=f"issue:{demo.id}",
+                       summary="Resolution Confidence 86/100 · ai verified",
+                       reason="AFTER evidence is consistent with the problem being resolved."))
         await s.commit()

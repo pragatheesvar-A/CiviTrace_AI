@@ -122,6 +122,8 @@ export default function Profile() {
         <div className="bg-white rounded-2xl p-2 shadow-sm divide-y divide-surface-high/60">
           {[
             ["folder_open", "My reports", "mine"],
+            ["account_balance", "Civic services & payments", "payments"],
+            ["shield_person", "Privacy", "privacy"],
             ["notifications_active", "Notifications", "notif"],
             ["verified_user", "Account security", "security"],
             ["help", "Help & support", "help"],
@@ -130,6 +132,7 @@ export default function Profile() {
               <button type="button"
                 onClick={() => {
                   if (key === "mine") { setTab("mine"); window.scrollTo({ top: 0, behavior: "smooth" }); }
+                  else if (key === "payments") { window.location.assign("/payments"); }
                   else setPanel(panel === key ? null : key);
                 }}
                 className="w-full flex items-center justify-between p-3.5 rounded-xl active:bg-surface-low">
@@ -140,6 +143,17 @@ export default function Profile() {
                 <Icon name={key === "mine" ? "chevron_right" : panel === key ? "expand_less" : "expand_more"} className="text-slate-300" />
               </button>
 
+              {panel === key && key === "privacy" && (
+                <div className="px-3.5 pb-3.5 space-y-2 text-sm text-on-variant">
+                  <p>Your phone number and email are <b>never</b> shown on public maps, dashboards or to other citizens.</p>
+                  <p>Each report has its own privacy control on the issue page:</p>
+                  <ul className="list-disc ml-4 space-y-0.5 text-xs">
+                    <li><b>Public / private</b> — a private report is visible only to you and the authority.</li>
+                    <li><b>Exact location</b> — off by default; the public map shows an approximate (~150 m) pin.</li>
+                  </ul>
+                  <p className="text-xs">Photos are EXIF-stripped and faces blurred before storage.</p>
+                </div>
+              )}
               {panel === key && key === "notif" && (
                 <div className="px-3.5 pb-3.5 space-y-2">
                   {[["status_updates", "Status updates on my reports"], ["nearby_alerts", "New critical issues near me"], ["resolved", "When an issue I follow is fixed"]].map(([k, t]) => (

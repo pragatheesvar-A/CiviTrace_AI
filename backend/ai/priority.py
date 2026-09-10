@@ -86,9 +86,18 @@ HAZARD_WORDS = ("live wire", "open manhole", "gas leak", "sinkhole", "collapsed"
                 "drowning", "person stuck", "car submerged", "no signal at highway")
 
 
+CRITICAL_INFRA_WORDS = ("school", "hospital", "clinic", "college", "kindergarten",
+                        "bus stand", "railway station", "market", "temple", "church",
+                        "mosque", "playground", "old age", "children")
+
+
 def compute(*, vision_conf=0.0, detections=0, severity=0.0, text_conf=0.0,
             cluster_size=1, upvotes=0, reporter_trust=0.5, ward_weight=0.5,
-            category="Roads", text="") -> PriorityResult:
+            category="Roads", text="",
+            # --- fair-priority signals (rule layer on top of the learned base) ---
+            issue_age_days=0.0, sla_overdue=False, citizen_confirmed=False,
+            evidence_trust=0.5, weather_factor=0.0, near_critical_infra=False,
+            affected_estimate=0, traffic_impact=0.0) -> PriorityResult:
     feats = np.array([[
         float(vision_conf),
         min(detections, 5) / 5,
@@ -131,10 +140,43 @@ def compute(*, vision_conf=0.0, detections=0, severity=0.0, text_conf=0.0,
         overrides.append("severe damage area -> high")
         level_idx = 2
 
+    # ---- fair-priority layer (transparent rules, not vote-driven) ----
+    infra = near_critical_infra or any(w in tl for w in CRITICAL_INFRA_WORDS)
+    if infra and level_idx < 2:
+        overrides.append("near a school / hospital / crowded place -> at least high")
+        level_idx = 2
+    if weather_factor >= 0.6 and category == "Flooding" and level_idx < 2:
+        overrides.append("live rainfall supports the flooding report -> at least high")
+        level_idx = 2
+    if affected_estimate >= 25 and level_idx < 2:
+        overrides.append(f"~{int(affected_estimate)} citizens affected -> at least high")
+        level_idx = 2
+    if traffic_impact >= 0.7 and level_idx < 2:
+        overrides.append("blocks a major road / junction -> at least high")
+        level_idx = 2
+    # duration fairness: an old, still-unresolved report should not sink in the queue
+    if issue_age_days >= 14 and level_idx < 2:
+        overrides.append(f"unresolved for {int(issue_age_days)} days -> at least high")
+        level_idx = 2
+    if sla_overdue and level_idx < 3:
+        overrides.append("SLA breached -> escalated")
+        level_idx = min(3, level_idx + 1)
+    if citizen_confirmed and evidence_trust >= 0.6 and level_idx < 2:
+        overrides.append("citizen-confirmed with trustworthy evidence -> at least high")
+        level_idx = 2
+
+    contrib = {k: float(v) for k, v in contrib.items()}
+    contrib.update({
+        "near_critical_infra": 1.0 if infra else 0.0,
+        "issue_age_days": round(float(issue_age_days), 1),
+        "sla_overdue": 1.0 if sla_overdue else 0.0,
+        "citizen_confirmed": 1.0 if citizen_confirmed else 0.0,
+        "evidence_trust": round(float(evidence_trust), 3),
+    })
     return PriorityResult(
         level=LEVELS[level_idx],
-        score=round(min(1.0, expected / 3), 3),
-        method=method,
-        contributions={k: float(v) for k, v in contrib.items()},
+        score=round(min(1.0, max(expected / 3, level_idx / 3)), 3),
+        method=method + "+fairness",
+        contributions=contrib,
         rule_overrides=overrides,
     )

@@ -18,7 +18,9 @@ const STATUS = {
   Verified: "bg-primary/10 text-primary",
   Assigned: "bg-indigo-500/10 text-indigo-600",
   "In Progress": "bg-amber-500/10 text-amber-600",
+  "AI Verified — Awaiting Confirmation": "bg-teal-500/10 text-primary",
   Resolved: "bg-secondary/10 text-secondary",
+  "Verified Closed": "bg-secondary/15 text-secondary",
   Rejected: "bg-error/10 text-error",
 };
 
@@ -208,6 +210,99 @@ export function Stepper({ steps, current }) {
         </React.Fragment>
       ))}
     </div>
+  );
+}
+
+// ---- Evidence Trust Score (0–100) + checklist ----
+const _CHK = { pass: ["check_circle", "#1f7a4d"], warn: ["warning", "#c2703d"], info: ["info", "#565750"], unknown: ["help", "#565750"] };
+export function EvidenceTrust({ data }) {
+  if (!data) return null;
+  const s = data.trust_score ?? 0;
+  const tone = s >= 70 ? "#1f7a4d" : s >= 45 ? "#0d5c63" : "#c2703d";
+  const R = 26, C = 2 * Math.PI * R;
+  const review = data.verdict === "needs_human_review";
+  return (
+    <div className="bg-white rounded-2xl p-4 shadow-sm card-line space-y-3">
+      <div className="flex items-center gap-4">
+        <svg width="64" height="64" viewBox="0 0 64 64" className="flex-shrink-0 -rotate-90">
+          <circle cx="32" cy="32" r={R} fill="none" stroke="#e2e0d6" strokeWidth="6" />
+          <circle cx="32" cy="32" r={R} fill="none" stroke={tone} strokeWidth="6" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={C * (1 - s / 100)} />
+        </svg>
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-variant">Evidence Trust</p>
+          <p className="text-2xl font-black font-headline leading-none mt-1" style={{ color: tone }}>
+            {s}<span className="text-sm text-on-variant font-bold">/100</span>
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: review ? "#c2703d" : "#565750" }}>
+            {review ? "Needs Human Review" : "Evidence looks consistent"}
+            {data.consistency ? ` · ${data.consistency} consistency` : ""}
+          </p>
+        </div>
+      </div>
+      {Array.isArray(data.checklist) && data.checklist.length > 0 && (
+        <ul className="space-y-1.5">
+          {data.checklist.map((c, n) => {
+            const [ic, col] = _CHK[c.status] || _CHK.info;
+            return (
+              <li key={n} className="flex items-start gap-2 text-xs">
+                <Icon name={ic} className="text-sm mt-px" style={{ color: col }} fill />
+                <span><span className="text-on-surface">{c.label}</span>
+                  {c.detail ? <span className="text-on-variant"> — {c.detail}</span> : null}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {data.prototype && <p className="text-[10px] text-slate-400">Heuristic prototype · scores illustrative (Not Yet Measured)</p>}
+    </div>
+  );
+}
+
+export function ConsistencyBadge({ level }) {
+  if (!level) return null;
+  const m = { high: ["bg-secondary/10 text-secondary", "High consistency"],
+    medium: ["bg-primary/10 text-primary", "Medium consistency"],
+    low: ["bg-orange-500/10 text-orange-600", "Low consistency"] }[level] || ["bg-surface-high text-on-variant", level];
+  return <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${m[0]}`}>{m[1]}</span>;
+}
+
+export function ResolutionCard({ issue }) {
+  if (!issue.resolution_confidence && !issue.resolution_note) return null;
+  const c = issue.resolution_confidence || 0;
+  const tone = c >= 70 ? "#1f7a4d" : "#c2703d";
+  return (
+    <div className="bg-white rounded-2xl p-4 shadow-sm card-line">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-variant">Resolution Confidence</p>
+        <span className="text-lg font-black font-headline" style={{ color: tone }}>{c}/100</span>
+      </div>
+      <p className="text-xs text-on-variant mt-1.5">{issue.resolution_note}</p>
+    </div>
+  );
+}
+
+export function AuditTimeline({ rows }) {
+  if (!rows || rows.length === 0) return <p className="text-sm text-on-variant">No history yet.</p>;
+  const icon = (a) => a.startsWith("ai.") ? "smart_toy" : a.includes("status") ? "flag"
+    : a.includes("review") ? "gavel" : a.includes("confirm") ? "how_to_reg" : a.includes("reopen") ? "replay" : "bolt";
+  return (
+    <ol className="relative border-l-2 border-surface-high ml-2 space-y-4">
+      {rows.map((r, n) => (
+        <li key={n} className="ml-4">
+          <span className="absolute -left-[9px] w-4 h-4 rounded-full bg-white border-2 border-primary/50 flex items-center justify-center" />
+          <div className="flex items-center gap-2">
+            <Icon name={icon(r.action)} className="text-sm text-primary" fill />
+            <span className="text-sm font-bold">{r.what}</span>
+          </div>
+          {r.why && <p className="text-xs text-on-variant mt-0.5">Why: {r.why}</p>}
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {new Date(r.ts).toLocaleString()} · {r.actor}
+            {r.overruled_by ? ` · overruled by ${r.overruled_by}` : ""}
+          </p>
+        </li>
+      ))}
+    </ol>
   );
 }
 

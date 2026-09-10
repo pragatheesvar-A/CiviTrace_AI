@@ -1,13 +1,18 @@
 // Converted from stitch mockup: issue_details/
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api, useAuth, useLiveFeed, fileToBase64 } from "../api.jsx";
+import {
+  api, useAuth, useLiveFeed, fileToBase64,
+  evidenceTrust, issueAudit, citizenConfirm, reopenIssue, setIssuePrivacy,
+} from "../api.jsx";
 import {
   Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, ConfidenceMeter,
-  AuthenticityChip, RecurrenceBanner, EtaChip, fmtAgo,
+  AuthenticityChip, RecurrenceBanner, EtaChip, EvidenceTrust, ConsistencyBadge,
+  ResolutionCard, AuditTimeline, fmtAgo,
 } from "../ui.jsx";
 
-const FLOW = ["Verifying", "Verified", "Assigned", "In Progress", "Resolved"];
+const FLOW = ["Verifying", "Verified", "Assigned", "In Progress", "AI Verified — Awaiting Confirmation", "Verified Closed"];
+const FLOW_SHORT = ["Filed", "Verified", "Assigned", "Fixing", "AI check", "Closed"];
 
 export default function IssueDetail() {
   const { id } = useParams();
@@ -15,12 +20,27 @@ export default function IssueDetail() {
   const nav = useNavigate();
   const [i, setI] = useState(null);
   const [comment, setComment] = useState("");
+  const [ev, setEv] = useState(null);
+  const [audit, setAudit] = useState(null);
+  const [showAudit, setShowAudit] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
-  const load = useCallback(() => api(`/issues/${id}`).then(setI).catch(() => setI(false)), [id]);
+  const load = useCallback(() => {
+    api(`/issues/${id}`).then(setI).catch(() => setI(false));
+    evidenceTrust(id).then(setEv).catch(() => {});
+  }, [id]);
   useEffect(() => { load(); }, [load]);
-  useLiveFeed(useCallback((ev) => {
-    if (ev.type === "issue.updated" && String(ev.issue?.id) === String(id)) setI(ev.issue);
+  useLiveFeed(useCallback((e) => {
+    if (e.type === "issue.updated" && String(e.issue?.id) === String(id)) { setI(e.issue); evidenceTrust(id).then(setEv).catch(() => {}); }
   }, [id]));
+  useEffect(() => { if (showAudit && !audit) issueAudit(id).then(setAudit).catch(() => setAudit([])); }, [showAudit, audit, id]);
+
+  const confirm = async (result) => {
+    setConfirming(true);
+    try { await citizenConfirm(id, result); } finally { setConfirming(false); load(); setAudit(null); }
+  };
+  const reopen = async () => { await reopenIssue(id); load(); setAudit(null); };
+  const togglePrivacy = async (k) => { await setIssuePrivacy(id, { [k]: !i[k] }); load(); };
 
   if (i === false) return <p className="py-24 text-center text-on-variant">Issue not found.</p>;
   if (!i) return <Spinner />;
@@ -90,6 +110,25 @@ export default function IssueDetail() {
           {i.status !== "Resolved" && <EtaChip days={i.eta_days} />}
           {i.description && <p className="text-on-surface leading-relaxed mt-3">{i.description}</p>}
 
+          <div className="mt-3 flex flex-wrap gap-2 items-center">
+            <ConsistencyBadge level={i.consistency} />
+            {i.in_human_review && (
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-orange-500/10 text-orange-600">
+                In human review
+              </span>
+            )}
+            {i.reopen_count > 0 && (
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-error/10 text-error">
+                Reopened ×{i.reopen_count}
+              </span>
+            )}
+            {!i.location_exact && (
+              <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                <Icon name="lock" className="text-xs" /> approximate location
+              </span>
+            )}
+          </div>
+
           <div className="mt-4 pt-4 border-t border-surface-high space-y-3">
             <RecurrenceBanner issue={i} />
             {i.dedupe_matched_id && (
@@ -98,16 +137,12 @@ export default function IssueDetail() {
                 <Icon name="merge" className="text-sm" /> Clustered with report #{i.dedupe_matched_id}
               </button>
             )}
+            <EvidenceTrust data={ev} />
             <ConfidenceMeter issue={i} />
             <AuthenticityChip issue={i} />
             <VerificationChip issue={i} />
             <p className="text-sm text-on-variant border-l-2 border-primary/30 pl-3">{i.verification_note}</p>
-            {i.status === "Resolved" && i.resolution_note && (
-              <p className={`text-sm border-l-2 pl-3 ${i.resolution_verified ? "text-secondary border-secondary/40" : "text-orange-600 border-orange-400/40"}`}>
-                <Icon name={i.resolution_verified ? "verified" : "gpp_maybe"} className="text-sm mr-1" fill />
-                {i.resolution_note}
-              </p>
-            )}
+            <ResolutionCard issue={i} />
             {i.cluster_count > 1 && (
               <p className="text-sm font-semibold flex items-center gap-1">
                 <Icon name="group_work" className="text-base text-primary" />
@@ -117,10 +152,63 @@ export default function IssueDetail() {
           </div>
         </div>
 
+        {i.awaiting_confirmation && user.id === i.reporter_id && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm card-line space-y-3 fadeup">
+            <p className="text-sm font-bold flex items-center gap-1.5">
+              <Icon name="how_to_reg" className="text-primary" fill /> Is this issue actually fixed?
+            </p>
+            <p className="text-xs text-on-variant">
+              The authority uploaded proof and our AI verified it ({i.resolution_confidence}/100). Your confirmation closes it.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button disabled={confirming} onClick={() => confirm("fixed")}
+                className="py-2.5 rounded-xl bg-secondary text-white text-xs font-bold">✓ Fixed</button>
+              <button disabled={confirming} onClick={() => confirm("partial")}
+                className="py-2.5 rounded-xl bg-amber-500/15 text-amber-700 text-xs font-bold">⚠ Partly</button>
+              <button disabled={confirming} onClick={() => confirm("still_exists")}
+                className="py-2.5 rounded-xl bg-error/10 text-error text-xs font-bold">✗ Still there</button>
+            </div>
+          </div>
+        )}
+
+        {(i.status === "Verified Closed" || i.citizen_confirmation === "fixed") && (
+          <div className="bg-secondary/5 rounded-2xl p-4 flex items-center gap-3">
+            <Icon name="verified" className="text-secondary text-2xl" fill />
+            <div>
+              <p className="font-bold text-secondary text-sm">AI Verified + Citizen Confirmed</p>
+              <p className="text-xs text-on-variant">This issue is closed with full evidence.</p>
+            </div>
+          </div>
+        )}
+
+        {["Resolved", "Verified Closed"].includes(i.status) && user.id === i.reporter_id && (
+          <button onClick={reopen} className="w-full py-3 rounded-full bg-white shadow-sm card-line text-error font-bold text-sm">
+            The problem is back — reopen this issue
+          </button>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
-          <Stat label="Category" value={i.category} sub={i.verification_method} />
-          <Stat label="Cluster" value={`#${i.cluster_id}`} sub={`${i.cluster_count} report(s)`} />
+          <Stat label="Category" value={i.category} sub={i.ward || i.verification_method} />
+          <Stat label="Evidence Trust" value={`${i.evidence_trust || "—"}/100`} sub={i.evidence_verdict?.replace(/_/g, " ")} />
         </div>
+
+        {user.id === i.reporter_id && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm card-line space-y-2.5">
+            <p className="text-xs font-bold uppercase tracking-widest text-on-variant flex items-center gap-1.5">
+              <Icon name="shield_person" className="text-sm text-primary" /> Privacy for this report
+            </p>
+            {[["is_public", "Visible to the public", i.is_public],
+              ["precise_location_public", "Show my exact location publicly", i.precise_location_public]].map(([k, label, on]) => (
+              <label key={k} className="flex items-center justify-between text-sm">
+                <span className="text-on-variant">{label}</span>
+                <button type="button" onClick={() => togglePrivacy(k)}
+                  className={`w-11 h-6 rounded-full transition-colors relative ${on ? "bg-primary" : "bg-surface-high"}`}>
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
+                </button>
+              </label>
+            ))}
+          </div>
+        )}
 
         <button onClick={() => vote("adopt")}
           className={`w-full py-3.5 rounded-full font-bold flex items-center justify-center gap-2 ${
@@ -130,15 +218,15 @@ export default function IssueDetail() {
           {i.has_adopted ? "Adopted — tracking this" : "Adopt this issue"}
         </button>
 
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
+        <div className="bg-white rounded-2xl p-4 shadow-sm card-line">
           <div className="flex justify-between">
             {FLOW.map((s, n) => {
-              const cur = i.status === "Reported" ? 0 : FLOW.indexOf(i.status);
+              const cur = ["Reported", "Verifying"].includes(i.status) ? (i.status === "Verifying" ? 0 : 1) : FLOW.indexOf(i.status);
               const done = cur >= n;
               return (
                 <div key={s} className="flex flex-col items-center gap-1 flex-1">
                   <div className={`w-3 h-3 rounded-full ${done ? "bg-primary" : "bg-slate-300"}`} />
-                  <span className={`text-[9px] font-bold uppercase text-center ${done ? "text-primary" : "text-slate-400"}`}>{s}</span>
+                  <span className={`text-[9px] font-bold uppercase text-center ${done ? "text-primary" : "text-slate-400"}`}>{FLOW_SHORT[n]}</span>
                 </div>
               );
             })}
@@ -163,10 +251,28 @@ export default function IssueDetail() {
 
         {i.after_photo_url && (
           <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-secondary mb-2">After — proof of fix</p>
-            <img src={i.after_photo_url} alt="" className="w-full h-48 object-cover rounded-2xl" />
+            <p className="text-xs font-bold uppercase tracking-widest text-secondary mb-2">Before → After</p>
+            <div className="grid grid-cols-2 gap-2">
+              {i.photo_url
+                ? <img src={i.photo_url} alt="before" className="w-full h-40 object-cover rounded-xl" />
+                : <div className="h-40 bg-surface-high rounded-xl grid place-items-center text-xs text-on-variant">no before photo</div>}
+              <img src={i.after_photo_url} alt="after" className="w-full h-40 object-cover rounded-xl" />
+            </div>
           </div>
         )}
+
+        <div className="bg-white rounded-2xl p-4 shadow-sm card-line">
+          <button onClick={() => setShowAudit((v) => !v)}
+            className="w-full flex items-center justify-between">
+            <span className="text-sm font-bold flex items-center gap-1.5">
+              <Icon name="history" className="text-primary" fill /> AI Decision & Audit History
+            </span>
+            <Icon name={showAudit ? "expand_less" : "expand_more"} className="text-slate-400" />
+          </button>
+          {showAudit && (
+            <div className="mt-4">{audit ? <AuditTimeline rows={audit} /> : <Spinner label="Loading history…" />}</div>
+          )}
+        </div>
 
         <section className="space-y-3">
           <h2 className="text-xl font-bold">Community updates ({i.comments.length})</h2>

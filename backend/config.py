@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     weather_enabled: bool = True
     weather_url: str = "https://api.open-meteo.com/v1/forecast"
 
+    # --- evidence / human review ---
+    evidence_trust_review_below: int = 45      # below this -> Human Review Queue
+    resolution_confidence_min: int = 70        # >= this -> AI-verified resolution
+
+    # --- Razorpay (TEST / sandbox only) — set via env, never hard-code ---
+    razorpay_key_id: str = ""                  # CIVIC_RAZORPAY_KEY_ID
+    razorpay_key_secret: str = ""              # CIVIC_RAZORPAY_KEY_SECRET
+    razorpay_webhook_secret: str = ""          # CIVIC_RAZORPAY_WEBHOOK_SECRET
+    payments_mode: str = "auto"               # auto -> test if keys present else simulated
+
     # --- misc ---
     # 7-category civic taxonomy (patent submission spec)
     categories: tuple[str, ...] = (

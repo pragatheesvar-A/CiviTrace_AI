@@ -41,6 +41,8 @@ export default function Home() {
       <section className="grid grid-cols-2 gap-3">
         <Tile to="/report" icon="add_circle" label="Report Issue" solid />
         <Tile to="/map" icon="map" label="Live Map" />
+        <Tile to="/services" icon="account_balance" label="Civic Services" />
+        <Tile to="/profile" icon="shield_person" label="My Reports & Privacy" />
         <Link to="/assistant"
           className="col-span-2 p-5 rounded-2xl bg-gradient-to-br from-primary to-primary-container text-white shadow-lg shadow-primary/20 flex items-center justify-between overflow-hidden relative">
           <div className="absolute -right-8 -top-8 w-28 h-28 bg-white/10 rounded-full blur-2xl" />

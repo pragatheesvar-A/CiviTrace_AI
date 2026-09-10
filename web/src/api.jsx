@@ -56,6 +56,39 @@ export async function issuesAround(lat, lng, { radius = 350, category, text } = 
   catch { return { open: [], resolved: [], count: 0, duplicate_candidates: [], recurrence_candidates: [] }; }
 }
 
+// ---- evidence trust / resolution / human review / audit ----
+export const evidenceTrust = (id) => api(`/issues/${id}/evidence-trust`, { auth: !!getAccess() });
+export const reanalyzeEvidence = (id) => api(`/issues/${id}/evidence/analyze`, { method: "POST" });
+export const issueAudit = (id) => api(`/issues/${id}/audit`, { auth: !!getAccess() });
+export const citizenConfirm = (id, result, note = "") =>
+  api(`/issues/${id}/citizen-confirmation`, { method: "POST", body: { result, note } });
+export const reopenIssue = (id) => api(`/issues/${id}/reopen`, { method: "POST" });
+export const setIssuePrivacy = (id, opts) => api(`/issues/${id}/privacy`, { method: "POST", body: opts });
+export const reviewQueue = () => api("/authority/review-queue");
+export const reviewDecide = (rid, decision, note = "") =>
+  api(`/authority/review/${rid}/decide`, { method: "POST", body: { decision, note } });
+export const fairnessReport = () => api("/authority/fairness");
+export const authorityAudit = () => api("/authority/audit");
+
+// ---- civic services & payments (Razorpay TEST / simulated) ----
+export const paymentsConfig = () => api("/payments/config");
+export const createPaymentOrder = (service_code) =>
+  api("/payments/create-order", { method: "POST", body: { service_code } });
+export const verifyPayment = (payload) => api("/payments/verify", { method: "POST", body: payload });
+export const paymentsHistory = () => api("/payments/history");
+export const paymentReceipt = (id) => api(`/payments/${id}/receipt`);
+
+export function loadRazorpay() {
+  return new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
+  });
+}
+
 // ---- public app config (map provider, assistant name) ----
 export function useConfig() {
   const [cfg, setCfg] = useState(null);

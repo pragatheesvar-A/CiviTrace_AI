@@ -11,6 +11,7 @@ import Profile from "./pages/Profile.jsx";
 import Assistant from "./pages/Assistant.jsx";
 import Authority from "./pages/Authority.jsx";
 import Emergency from "./pages/Emergency.jsx";
+import Payments from "./pages/Payments.jsx";
 
 class ErrorBoundary extends React.Component {
   state = { err: null };
@@ -117,6 +118,8 @@ export default function App() {
         <Route path="/report" element={<Report />} />
         <Route path="/assistant" element={<Assistant />} />
         <Route path="/emergency" element={<Emergency />} />
+        <Route path="/services" element={<Payments />} />
+        <Route path="/payments" element={<Payments />} />
         <Route path="/issues/:id" element={<IssueDetail />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/authority" element={user.role === "authority" ? <Authority /> : <Navigate to="/" replace />} />

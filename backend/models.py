@@ -89,7 +89,25 @@ class Issue(Base):
     # resolution-proof verification (after-photo check)
     resolution_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     resolution_note: Mapped[str] = mapped_column(String(400), default="")
+    resolution_confidence: Mapped[int] = mapped_column(Integer, default=0)
     eta_days: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # evidence trust + multimodal consistency (latest, denormalised for lists)
+    evidence_trust: Mapped[int] = mapped_column(Integer, default=0)       # 0-100
+    evidence_verdict: Mapped[str] = mapped_column(String(24), default="")  # trusted|needs_human_review
+    consistency: Mapped[str] = mapped_column(String(12), default="")       # high|medium|low
+
+    # workflow additions
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    awaiting_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
+    citizen_confirmation: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # fixed|still_exists|partial
+    reopen_count: Mapped[int] = mapped_column(Integer, default=0)
+    in_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    ward: Mapped[str] = mapped_column(String(60), default="")
+
+    # privacy
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True)
+    precise_location_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
     reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -131,8 +149,97 @@ class AuditLog(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    actor_role: Mapped[str] = mapped_column(String(20), default="")
+    actor_role: Mapped[str] = mapped_column(String(20), default="")   # citizen|authority|ai|system
     action: Mapped[str] = mapped_column(String(60), index=True)
-    target: Mapped[str] = mapped_column(String(120), default="")
+    target: Mapped[str] = mapped_column(String(120), default="", index=True)
     ip: Mapped[str] = mapped_column(String(60), default="")
+    # for the human-readable "AI Decision & Audit History"
+    summary: Mapped[str] = mapped_column(String(400), default="")     # WHAT
+    reason: Mapped[str] = mapped_column(String(600), default="")      # WHY
+    overruled_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # WHO overruled
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class EvidenceCheck(Base):
+    """One row per evidence-analysis run for an issue (kept as history)."""
+    __tablename__ = "evidence_checks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), index=True)
+    trust_score: Mapped[int] = mapped_column(Integer, default=0)
+    verdict: Mapped[str] = mapped_column(String(24), default="")
+    consistency: Mapped[str] = mapped_column(String(12), default="")
+    recommended_action: Mapped[str] = mapped_column(String(32), default="")
+    checklist: Mapped[list] = mapped_column(JSON, default=list)
+    conflicts: Mapped[list] = mapped_column(JSON, default=list)
+    model_version: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResolutionVerification(Base):
+    __tablename__ = "resolution_verifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), index=True)
+    confidence: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(24), default="")   # ai_verified|needs_human_review|not_fixed
+    same_location: Mapped[bool] = mapped_column(Boolean, default=True)
+    problem_before: Mapped[bool] = mapped_column(Boolean, default=False)
+    problem_after: Mapped[bool] = mapped_column(Boolean, default=False)
+    after_relevant: Mapped[bool] = mapped_column(Boolean, default=False)
+    checklist: Mapped[list] = mapped_column(JSON, default=list)
+    before_photo_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    after_photo_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    note: Mapped[str] = mapped_column(String(400), default="")
+    model_version: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class HumanReview(Base):
+    __tablename__ = "human_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="evidence")   # evidence|resolution|conflict|priority
+    reason: Mapped[str] = mapped_column(String(400), default="")
+    ai_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    evidence_trust: Mapped[int] = mapped_column(Integer, default=0)
+    conflicts: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_action: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open|decided
+    reviewer_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    decision: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)   # approve|reject|request_evidence|reopen|escalate
+    decision_note: Mapped[str] = mapped_column(String(600), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaymentOrder(Base):
+    """Civic-services payment (Razorpay TEST/sandbox). Completely separate from
+    civic complaints — never affects issue priority."""
+    __tablename__ = "payment_orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    service_code: Mapped[str] = mapped_column(String(40))
+    service_name: Mapped[str] = mapped_column(String(120))
+    amount: Mapped[int] = mapped_column(Integer)          # in paise
+    currency: Mapped[str] = mapped_column(String(8), default="INR")
+    provider: Mapped[str] = mapped_column(String(20), default="razorpay")
+    provider_order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="created", index=True)  # created|paid|failed|cancelled|refunded
+    receipt_no: Mapped[str] = mapped_column(String(40), default="")
+    mode: Mapped[str] = mapped_column(String(16), default="test")   # test|simulated
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("payment_orders.id"), index=True)
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    provider_signature: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    event: Mapped[str] = mapped_column(String(40), default="")       # verify|webhook:payment.captured|...
+    method: Mapped[str] = mapped_column(String(20), default="")
+    status: Mapped[str] = mapped_column(String(16), default="")
+    raw: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

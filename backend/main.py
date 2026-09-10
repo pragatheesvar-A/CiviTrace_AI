@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -27,12 +28,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import auth as A
+import payments as pay
 from ai import (registry, verify as ai_verify, dedup as ai_dedup, priority as ai_priority,
-                trust as ai_trust, authenticity as ai_auth, weather as ai_weather)
+                trust as ai_trust, authenticity as ai_auth, weather as ai_weather,
+                evidence as ai_evidence, resolution as ai_resolution, wards as ai_wards)
 from ai.assistant import assistant, ASSISTANT_NAME, ASSISTANT_TAGLINE
 from ai.text_classifier import embed as text_embed
 from config import settings
-from models import AuditLog, Base, Comment, Issue, OtpCode, RefreshToken, User, Vote, utcnow
+from models import (AuditLog, Base, Comment, EvidenceCheck, HumanReview, Issue, OtpCode,
+                    PaymentOrder, PaymentTransaction, RefreshToken, ResolutionVerification,
+                    User, Vote, utcnow)
 from security import (SecurityHeadersMiddleware, global_limiter, report_limiter, sanitize_image)
 
 engine = create_async_engine(settings.db_url, echo=False)
@@ -43,6 +48,33 @@ Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession
 async def get_session() -> AsyncSession:
     async with Session() as s:
         yield s
+
+
+def jsonable(x):
+    """Recursively coerce numpy / non-primitive values to JSON-safe Python types."""
+    if isinstance(x, dict):
+        return {str(k): jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [jsonable(v) for v in x]
+    if isinstance(x, (str, bool)) or x is None:
+        return x
+    if isinstance(x, int):
+        return x
+    try:
+        import numpy as _np
+        if isinstance(x, _np.generic):
+            return x.item()
+        if isinstance(x, _np.ndarray):
+            return [jsonable(v) for v in x.tolist()]
+    except Exception:
+        pass
+    if isinstance(x, float):
+        return round(x, 6)
+    try:
+        float(x)
+        return float(x)
+    except (TypeError, ValueError):
+        return str(x)
 
 
 def aware(dt: Optional[datetime]) -> Optional[datetime]:
@@ -58,10 +90,18 @@ def client_ip(req: Request) -> str:
 
 
 async def audit(s: AsyncSession, *, actor: Optional[User], action: str, target: str = "",
-                ip: str = "", **meta):
+                ip: str = "", summary: str = "", reason: str = "",
+                actor_role: str = "", overruled_by: Optional[int] = None, **meta):
     s.add(AuditLog(actor_id=actor.id if actor else None,
-                   actor_role=actor.role if actor else "",
-                   action=action, target=target, ip=ip, meta=meta))
+                   actor_role=actor_role or (actor.role if actor else "system"),
+                   action=action, target=target, ip=ip,
+                   summary=summary, reason=reason, overruled_by=overruled_by, meta=meta))
+
+
+async def ai_audit(s: AsyncSession, *, target: str, action: str, summary: str, reason: str = "", **meta):
+    """Record an AI decision in the governance trail (WHAT / WHY / WHEN)."""
+    s.add(AuditLog(actor_id=None, actor_role="ai", action=action, target=target,
+                   summary=summary, reason=reason, meta=meta))
 
 
 async def get_current_user(
@@ -154,10 +194,31 @@ async def issue_public(session: AsyncSession, i: Issue, viewer: Optional[User]) 
         )).scalars().all()
         voted, adopted = "up" in kinds, "adopt" in kinds
     rtrust = ai_trust.trust_score(reporter.reports_valid, reporter.reports_invalid) if reporter else 0.5
+
+    # ---- privacy: coarsen the location for the public unless the reporter opted in ----
+    is_owner = bool(viewer and viewer.id == i.reporter_id)
+    is_staff = bool(viewer and viewer.role == "authority")
+    lat, lng, addr, loc_exact = i.lat, i.lng, i.address, True
+    if not (is_owner or is_staff) and not i.precise_location_public:
+        # snap to ~150 m grid + drop the house-level part of the address
+        lat = round(i.lat, 3)
+        lng = round(i.lng, 3)
+        parts = [p.strip() for p in (i.address or "").split(",") if p.strip()]
+        addr = ", ".join(parts[1:]) if len(parts) > 2 else (i.address or "")
+        loc_exact = False
+
     return {
         "id": i.id, "title": i.title, "description": i.description, "category": i.category,
         "status": i.status, "priority": i.priority, "priority_score": i.priority_score,
-        "lat": i.lat, "lng": i.lng, "address": i.address, "ward_weight": i.ward_weight,
+        "lat": lat, "lng": lng, "address": addr, "ward_weight": i.ward_weight,
+        "location_exact": loc_exact, "is_public": i.is_public, "ward": i.ward,
+        "precise_location_public": i.precise_location_public,
+        "evidence_trust": i.evidence_trust, "evidence_verdict": i.evidence_verdict,
+        "consistency": i.consistency,
+        "resolution_confidence": i.resolution_confidence,
+        "awaiting_confirmation": i.awaiting_confirmation,
+        "citizen_confirmation": i.citizen_confirmation,
+        "reopen_count": i.reopen_count, "in_human_review": i.in_human_review,
         "photo_url": i.photo_url, "after_photo_url": i.after_photo_url,
         "verified": i.verified, "verification_method": i.verification_method,
         "verification_confidence": i.verification_confidence,
@@ -227,6 +288,34 @@ class StatusIn(BaseModel):
     status: str
     after_photo_base64: Optional[str] = None
     reporter_feedback: Optional[str] = None  # "valid" | "invalid"
+    note: str = ""
+
+
+class ConfirmIn(BaseModel):
+    result: str = Field(pattern="^(fixed|still_exists|partial)$")
+    note: str = Field(default="", max_length=1000)
+
+
+class ReviewDecisionIn(BaseModel):
+    decision: str = Field(pattern="^(approve|reject|request_evidence|reopen|escalate)$")
+    note: str = Field(default="", max_length=1000)
+
+
+class PrivacyIn(BaseModel):
+    is_public: Optional[bool] = None
+    precise_location_public: Optional[bool] = None
+
+
+class PaymentOrderIn(BaseModel):
+    service_code: str
+
+
+class PaymentVerifyIn(BaseModel):
+    order_id: int
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    method: str = ""
 
 
 class RainfallIn(BaseModel):
@@ -316,6 +405,15 @@ async def public_config():
         "gmaps_key_present": bool(os.environ.get("CIVIC_GMAPS_KEY")),
         "categories": list(settings.categories),
         "vision_categories": list(settings.vision_categories),
+        "payments_mode": pay.mode(),
+        "features": {
+            "evidence_trust": True, "multimodal_consistency": True,
+            "human_review": True, "resolution_verification": True,
+            "citizen_confirmation": True, "fair_priority": True,
+            "ward_fairness": True, "ai_audit_trail": True, "payments": True,
+        },
+        "prototype_notice": "AI components are heuristic prototypes — scores are illustrative "
+                            "and Not Yet Measured. Payments run in Razorpay TEST/sandbox or simulated mode.",
     }
 
 
@@ -518,6 +616,13 @@ async def twofa_verify(payload: dict, user: User = Depends(get_current_user),
 
 
 # ---- issues ----
+def can_view(i: Issue, viewer: Optional[User]) -> bool:
+    """Private reports are visible only to their reporter and to authority staff."""
+    if i.is_public:
+        return True
+    return bool(viewer and (viewer.id == i.reporter_id or viewer.role == "authority"))
+
+
 @app.get("/api/issues")
 async def list_issues(category: Optional[str] = None, status_f: Optional[str] = None,
                       mine: bool = False, session: AsyncSession = Depends(get_session),
@@ -532,7 +637,7 @@ async def list_issues(category: Optional[str] = None, status_f: Optional[str] = 
         q = q.where(Issue.reporter_id == viewer.id)
     q = q.order_by(Issue.created_at.desc())
     issues = (await session.execute(q)).scalars().all()
-    return [await issue_public(session, i, viewer) for i in issues]
+    return [await issue_public(session, i, viewer) for i in issues if can_view(i, viewer)]
 
 
 @app.get("/api/issues/around")
@@ -564,6 +669,8 @@ async def issues_around(lat: float, lng: float, radius: float = 350.0,
 
     open_hits, resolved_hits = [], []
     for o in rows:
+        if not can_view(o, viewer):
+            continue
         d = ai_dedup.haversine_m(lat, lng, o.lat, o.lng)
         if d > radius:
             continue
@@ -593,7 +700,7 @@ async def get_issue(issue_id: int, session: AsyncSession = Depends(get_session),
                     authorization: Optional[str] = Header(default=None)):
     viewer = await maybe_user(session, authorization)
     i = await session.get(Issue, issue_id)
-    if not i:
+    if not i or not can_view(i, viewer):
         raise HTTPException(404, "Issue not found")
     return await issue_public(session, i, viewer)
 
@@ -601,13 +708,27 @@ async def get_issue(issue_id: int, session: AsyncSession = Depends(get_session),
 async def _recompute_priority(session: AsyncSession, issue: Issue) -> None:
     cc = await cluster_count(session, issue.cluster_id)
     rtrust = await reporter_trust(session, issue.reporter_id)
+    age_days = (utcnow() - aware(issue.created_at)).total_seconds() / 86400 if issue.created_at else 0.0
+    sla = {"critical": 1, "high": 3, "medium": 7, "low": 14}.get(issue.priority, 7)
+    weather_f = 0.0
+    if issue.category == "Flooding":
+        try:
+            weather_f = ai_weather.context_for(issue.lat, issue.lng).rain_factor
+        except Exception:
+            weather_f = 0.0
+    text = f"{issue.title} {issue.description} {issue.address}"
     pr = ai_priority.compute(
         vision_conf=issue.verification_confidence if issue.verification_method == "vision" else 0.0,
         detections=issue.detection_count, severity=issue.severity,
         text_conf=issue.verification_confidence if issue.verification_method == "text" else 0.0,
         cluster_size=cc, upvotes=issue.upvotes, reporter_trust=rtrust,
-        ward_weight=issue.ward_weight, category=issue.category,
-        text=f"{issue.title} {issue.description}",
+        ward_weight=issue.ward_weight, category=issue.category, text=text,
+        issue_age_days=age_days,
+        sla_overdue=(issue.status not in ("Resolved", "Rejected") and age_days > sla),
+        citizen_confirmed=(issue.citizen_confirmation == "fixed"),
+        evidence_trust=(issue.evidence_trust or 50) / 100,
+        weather_factor=weather_f,
+        affected_estimate=max(0, (cc - 1) * 8 + issue.upvotes),
     )
     issue.priority, issue.priority_score, issue.priority_explanation = pr.level, pr.score, pr.dict()
 
@@ -679,6 +800,63 @@ async def _assess_authenticity(session: AsyncSession, issue: Issue,
     )
     issue.authenticity_score = a.score
     issue.authenticity = a.dict()
+    return novel, scene_pass
+
+
+async def _assess_evidence(session: AsyncSession, issue: Issue, photo_path,
+                           verdict, novel, scene_pass) -> "ai_evidence.EvidenceResult":
+    cc = await cluster_count(session, issue.cluster_id)
+    scene_score = 0.0
+    for ev in (verdict.evidence or []):
+        if ev.get("stage") in ("scene_gate", "rain_correlation"):
+            scene_score = max(scene_score, float(ev.get("score", ev.get("rain_factor", 0)) or 0))
+    sensor = None
+    if issue.category == "Flooding":
+        try:
+            rc = ai_weather.context_for(issue.lat, issue.lng)
+            sensor = {"type": "rainfall", "value": rc.rain_last_24h_mm, "unit": " mm/24h",
+                      "supports": rc.rain_factor >= 0.4}
+        except Exception:
+            sensor = None
+    # crude address<->coords plausibility: within Greater Chennai bounding box
+    in_city = (12.7 <= issue.lat <= 13.4) and (79.9 <= issue.lng <= 80.4)
+    ev = ai_evidence.assess(
+        has_photo=bool(photo_path), scene_pass=scene_pass, scene_score=scene_score,
+        detections=verdict.detections,
+        text_agrees=(verdict.category_suggestion == issue.category),
+        novel_image=(None if not photo_path else novel),
+        gps_provided=True, gps_plausible=in_city,
+        address_matches=(None if not issue.address else True),
+        nearby_support=max(0, cc - 1),
+        reporter_trust=await reporter_trust(session, issue.reporter_id),
+        sensor=sensor,
+    )
+    issue.evidence_trust = ev.trust_score
+    issue.evidence_verdict = ev.verdict
+    issue.consistency = ev.consistency
+    session.add(EvidenceCheck(
+        issue_id=issue.id, trust_score=ev.trust_score, verdict=ev.verdict,
+        consistency=ev.consistency, recommended_action=ev.recommended_action,
+        checklist=ev.checklist, conflicts=ev.conflicts, model_version=ev.model_version,
+    ))
+    return ev
+
+
+async def _open_review(session: AsyncSession, issue: Issue, *, kind: str, reason: str,
+                       ai_confidence: float, conflicts: list, recommended: str):
+    exists = await session.scalar(select(HumanReview).where(
+        HumanReview.issue_id == issue.id, HumanReview.kind == kind, HumanReview.status == "open"))
+    if exists:
+        return exists
+    hr = HumanReview(issue_id=issue.id, kind=kind, reason=reason,
+                     ai_confidence=ai_confidence, evidence_trust=issue.evidence_trust,
+                     conflicts=conflicts or [], recommended_action=recommended, status="open")
+    session.add(hr)
+    issue.in_human_review = True
+    await ai_audit(session, target=f"issue:{issue.id}", action="ai.route_human_review",
+                   summary=f"Routed to Human Review Queue ({kind})", reason=reason,
+                   conflicts=conflicts or [])
+    return hr
 
 
 async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> None:
@@ -721,16 +899,23 @@ async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> No
                 issue.verification_note = verdict.note
             else:
                 issue.verification_note = verdict.note + " " + issue.verification_note
-            issue.evidence = verdict.evidence
+            issue.evidence = jsonable(verdict.evidence)
             issue.model_version = verdict.model_version
 
-            # 3) authenticity / anti-abuse
-            await _assess_authenticity(s, issue, photo_path, verdict)
+            # 3) authenticity / anti-abuse  +  4) evidence trust & multimodal consistency
+            novel, scene_pass = await _assess_authenticity(s, issue, photo_path, verdict)
+            ev = await _assess_evidence(s, issue, photo_path, verdict, novel, scene_pass)
+            issue.ward = ai_wards.assign(issue.lat, issue.lng)
+
+            await ai_audit(s, target=f"issue:{issue.id}", action="ai.evidence_analyzed",
+                           summary=f"Evidence Trust {ev.trust_score}/100 · {ev.consistency} consistency · "
+                                   f"{ev.verdict.replace('_', ' ')}",
+                           reason="; ".join(ev.conflicts) or "no conflicting signals detected",
+                           trust_score=ev.trust_score, consistency=ev.consistency,
+                           checklist=ev.checklist, model_version=ev.model_version)
 
             # "AI Verified" is only granted with a genuine VISION match that is also
-            # plausibly authentic — OR independent corroboration (3+ citizen reports
-            # clustered at this spot). A confident-sounding text description with no
-            # photo is never auto-verified.
+            # plausibly authentic — OR independent corroboration (3+ citizen reports).
             cc = await cluster_count(s, issue.cluster_id)
             vision_ok = (verdict.verified and verdict.method == "vision"
                          and issue.authenticity_score >= settings.authenticity_verify_min)
@@ -742,17 +927,29 @@ async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> No
             ok = vision_ok or corroborated
             if issue.status in ("Reported", "Verifying"):
                 issue.status = "Verified" if ok else "Reported"
-            if issue.recurrence and issue.priority in ("low", "medium"):
-                issue.priority = "high"  # chronic-spot escalation floor
+
+            # uncertain evidence / conflicts -> Human Review Queue (citizen NOT penalised)
+            if ev.verdict == "needs_human_review":
+                await _open_review(s, issue, kind="evidence",
+                                   reason=ev.note + " " + "; ".join(ev.conflicts),
+                                   ai_confidence=verdict.confidence, conflicts=ev.conflicts,
+                                   recommended=ev.recommended_action)
 
             await _recompute_priority(s, issue)
             if issue.recurrence and issue.priority in ("low", "medium"):
                 issue.priority = "high"
             issue.eta_days = await _eta_days(s, issue.category, issue.priority)
+            await ai_audit(s, target=f"issue:{issue.id}", action="ai.priority_set",
+                           summary=f"Priority set to {issue.priority} "
+                                   f"({round((issue.priority_score or 0) * 100)}/100)",
+                           reason="; ".join((issue.priority_explanation or {}).get("rule_overrides", []))
+                                  or "learned base model, no rule overrides")
             await s.commit()
             await hub.broadcast({"type": "issue.updated", "issue": await issue_public(s, issue, None)})
     except Exception as e:  # pragma: no cover
-        print(f"[bg process] issue {issue_id}: {e}", flush=True)
+        import traceback
+        print(f"[bg process] issue {issue_id}: {e!r}", flush=True)
+        traceback.print_exc()
 
 
 async def _create_issue(session: AsyncSession, user: User, body: IssueIn, ip: str) -> dict:
@@ -1000,6 +1197,10 @@ async def authority_kpis(_: User = Depends(require_authority), session: AsyncSes
     merged = 0
     for c in cluster_ids:
         merged += await cluster_count(session, c) - 1
+    review_open = await session.scalar(
+        select(func.count()).select_from(HumanReview).where(HumanReview.status == "open")) or 0
+    awaiting = sum(1 for i in openi if i.awaiting_confirmation)
+    reopened = sum(1 for i in alli if i.reopen_count > 0)
     return {
         "total": total, "open": len(openi), "resolved": len(resolved),
         "resolution_rate": round(len(resolved) / total, 3) if total else 0.0,
@@ -1008,14 +1209,31 @@ async def authority_kpis(_: User = Depends(require_authority), session: AsyncSes
         "verified_open_share": round(sum(1 for i in openi if i.verified) / len(openi), 3) if openi else 0.0,
         "by_category": by_cat, "by_priority": by_pri,
         "clusters": len(cluster_ids), "duplicates_merged": merged,
+        "human_review_open": review_open, "awaiting_citizen_confirmation": awaiting,
+        "reopened": reopened,
+        "avg_evidence_trust": round(sum(i.evidence_trust for i in openi) / len(openi)) if openi else 0,
     }
 
 
 @app.get("/api/authority/audit")
-async def authority_audit(_: User = Depends(require_authority), session: AsyncSession = Depends(get_session)):
-    rows = (await session.execute(select(AuditLog).order_by(AuditLog.ts.desc()).limit(100))).scalars().all()
-    return [{"ts": r.ts.isoformat(), "actor_id": r.actor_id, "actor_role": r.actor_role,
-             "action": r.action, "target": r.target, "ip": r.ip, "meta": r.meta} for r in rows]
+async def authority_audit(limit: int = 150, _: User = Depends(require_authority),
+                          session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(select(AuditLog).order_by(AuditLog.ts.desc())
+                                  .limit(min(limit, 500)))).scalars().all()
+    names: dict[int, str] = {}
+    for r in rows:
+        for uid in (r.actor_id, r.overruled_by):
+            if uid and uid not in names:
+                u = await session.get(User, uid)
+                names[uid] = u.name if u else f"user {uid}"
+    return [{
+        "ts": r.ts.isoformat(), "target": r.target, "action": r.action,
+        "actor": names.get(r.actor_id, r.actor_role.upper() or "SYSTEM"),
+        "actor_role": r.actor_role,
+        "what": r.summary or r.action.replace(".", " ").replace("_", " ").title(),
+        "why": r.reason or "", "overruled_by": names.get(r.overruled_by),
+        "ip": r.ip, "meta": r.meta or {},
+    } for r in rows]
 
 
 @app.post("/api/authority/issues/{issue_id}/status")
@@ -1028,43 +1246,420 @@ async def set_status(issue_id: int, body: StatusIn, request: Request,
     if not issue:
         raise HTTPException(404, "Issue not found")
     prev = issue.status
-    issue.status = body.status
     rep = await session.get(User, issue.reporter_id)
+
+    if body.status in ("Assigned", "In Progress") and not issue.assigned_at:
+        issue.assigned_at = utcnow()
+
     if body.status == "Resolved":
-        issue.resolved_at = utcnow()
+        # Authority marks "fixed" -> AI resolution verification -> citizen confirmation.
         url, _ = await _decode_and_store(body.after_photo_base64, "after")
         if url:
             issue.after_photo_url = url
-            # verify the proof-of-fix photo: a real scene, and not just the
-            # 'before' image re-uploaded
-            apath = os.path.join(settings.upload_dir, os.path.basename(url))
-            ah = await asyncio.to_thread(ai_auth.dhash, apath)
-            scene = await asyncio.to_thread(ai_verify.scene_gate.check, apath,
-                                            issue.category if issue.category in settings.vision_categories else "Roads")
-            same = ai_auth.hamming(ah, issue.photo_hash) <= 6 if issue.photo_hash else False
-            issue.resolution_verified = bool(scene.is_scene and not same)
-            issue.resolution_note = (
-                f"Proof photo: scene {scene.score:.0%}"
-                + (" · ⚠ identical to the original photo" if same else " · distinct from the original")
-                + (" — accepted." if issue.resolution_verified else " — needs review."))
-        else:
-            issue.resolution_note = "Resolved without a proof-of-fix photo."
+        rv = await _verify_resolution(session, issue)
+        issue.resolution_confidence = rv.confidence
+        issue.resolution_verified = rv.status == "ai_verified"
+        issue.resolution_note = rv.note
+        session.add(ResolutionVerification(
+            issue_id=issue.id, confidence=rv.confidence, status=rv.status,
+            same_location=rv.same_location, problem_before=rv.problem_before,
+            problem_after=rv.problem_after, after_relevant=rv.after_relevant,
+            checklist=rv.checklist, before_photo_url=issue.photo_url,
+            after_photo_url=issue.after_photo_url, note=rv.note, model_version=rv.model_version))
+        await ai_audit(session, target=f"issue:{issue.id}", action="ai.resolution_verified",
+                       summary=f"Resolution Confidence {rv.confidence}/100 · {rv.status.replace('_', ' ')}",
+                       reason=rv.note, checklist=rv.checklist)
+
+        if rv.status == "ai_verified":
+            issue.status = "AI Verified — Awaiting Confirmation"
+            issue.awaiting_confirmation = True
+            issue.resolved_at = None
+        elif rv.status == "not_fixed":
+            issue.status = "In Progress"
+            issue.awaiting_confirmation = False
+            await _open_review(session, issue, kind="resolution",
+                               reason="AFTER evidence does not show the problem resolved.",
+                               ai_confidence=rv.confidence / 100, conflicts=[], recommended="request_evidence")
+        else:  # needs_human_review
+            issue.status = "In Progress"
+            issue.awaiting_confirmation = False
+            await _open_review(session, issue, kind="resolution",
+                               reason=rv.note, ai_confidence=rv.confidence / 100,
+                               conflicts=[], recommended="human_review")
+    elif body.status == "Rejected":
+        issue.status = "Rejected"
         if rep:
-            rep.points += 10
-            rep.reports_valid += 1
-    elif body.status == "Rejected" and rep:
-        rep.reports_invalid += 1
+            rep.reports_invalid += 1
     else:
-        issue.resolved_at = None
+        issue.status = body.status
+        if body.status != "Resolved":
+            issue.resolved_at = None
+
     if body.reporter_feedback == "valid" and rep:
         rep.reports_valid += 1
     elif body.reporter_feedback == "invalid" and rep:
         rep.reports_invalid += 1
+
     await audit(session, actor=actor, action="issue.status", target=f"issue:{issue_id}",
-                ip=client_ip(request), **{"from": prev, "to": body.status})
+                ip=client_ip(request), actor_role="authority",
+                summary=f"Status changed: {prev} → {issue.status}",
+                reason=(body.note or "authority workflow action"),
+                **{"from": prev, "to": issue.status})
     await session.commit()
     await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, issue, None)})
     return await issue_public(session, issue, None)
+
+
+async def _verify_resolution(session: AsyncSession, issue: Issue) -> "ai_resolution.ResolutionResult":
+    """Compare BEFORE vs AFTER evidence and produce a Resolution Confidence."""
+    cat = issue.category if issue.category in settings.vision_categories else "Roads"
+    before_scene = before_det = None
+    for ev in (issue.evidence or []):
+        if ev.get("stage") == "scene_gate":
+            before_scene = bool(ev.get("is_scene"))
+        if ev.get("stage") == "detector":
+            before_det = int(ev.get("count", 0))
+    before_det = before_det if before_det is not None else issue.detection_count
+
+    after_scene = after_det = None
+    frames_identical = False
+    after_score = 0.0
+    if issue.after_photo_url:
+        apath = os.path.join(settings.upload_dir, os.path.basename(issue.after_photo_url))
+        try:
+            sc = await asyncio.to_thread(ai_verify.scene_gate.check, apath, cat)
+            after_scene, after_score = sc.is_scene, sc.score
+            if issue.category in settings.vision_categories:
+                det = await asyncio.to_thread(ai_verify.detector.detect, apath)
+                after_det = det.count
+            ah = await asyncio.to_thread(ai_auth.dhash, apath)
+            frames_identical = ai_auth.hamming(ah, issue.photo_hash) <= 6 if issue.photo_hash else False
+        except Exception:
+            pass
+    return ai_resolution.verify(
+        category=issue.category, same_location=True,
+        before_scene_pass=before_scene, before_detections=before_det or 0,
+        after_scene_pass=after_scene, after_detections=after_det or 0,
+        frames_identical=frames_identical, after_scene_score=after_score or 0.0)
+
+
+# ---- evidence trust / resolution / citizen confirmation / human review ----
+@app.get("/api/issues/{issue_id}/evidence-trust")
+async def evidence_trust(issue_id: int, session: AsyncSession = Depends(get_session),
+                         authorization: Optional[str] = Header(default=None)):
+    viewer = await maybe_user(session, authorization)
+    i = await session.get(Issue, issue_id)
+    if not i or not can_view(i, viewer):
+        raise HTTPException(404, "Issue not found")
+    row = (await session.execute(select(EvidenceCheck).where(EvidenceCheck.issue_id == issue_id)
+                                 .order_by(EvidenceCheck.created_at.desc()).limit(1))).scalar_one_or_none()
+    if not row:
+        return {"issue_id": issue_id, "trust_score": i.evidence_trust, "verdict": i.evidence_verdict,
+                "consistency": i.consistency, "checklist": [], "conflicts": [],
+                "note": "Evidence analysis has not completed yet.", "prototype": True}
+    return {"issue_id": issue_id, "trust_score": row.trust_score, "verdict": row.verdict,
+            "consistency": row.consistency, "recommended_action": row.recommended_action,
+            "checklist": row.checklist, "conflicts": row.conflicts,
+            "model_version": row.model_version, "created_at": row.created_at.isoformat(),
+            "prototype": True}
+
+
+@app.post("/api/issues/{issue_id}/evidence/analyze")
+async def evidence_analyze(issue_id: int, user: User = Depends(get_current_user),
+                           session: AsyncSession = Depends(get_session)):
+    i = await session.get(Issue, issue_id)
+    if not i:
+        raise HTTPException(404, "Issue not found")
+    if user.role != "authority" and user.id != i.reporter_id:
+        raise HTTPException(403, "Not allowed")
+    photo_path = os.path.join(settings.upload_dir, os.path.basename(i.photo_url)) if i.photo_url else None
+    ai_queue.put_nowait((i.id, photo_path))
+    return {"queued": True, "note": "Re-running the evidence pipeline — watch the issue for updates."}
+
+
+@app.post("/api/issues/{issue_id}/citizen-confirmation")
+async def citizen_confirmation(issue_id: int, body: ConfirmIn, request: Request,
+                               user: User = Depends(get_current_user),
+                               session: AsyncSession = Depends(get_session)):
+    i = await session.get(Issue, issue_id)
+    if not i:
+        raise HTTPException(404, "Issue not found")
+    if i.reporter_id != user.id:
+        raise HTTPException(403, "Only the citizen who reported this can confirm it")
+    i.citizen_confirmation = body.result
+    i.awaiting_confirmation = False
+    if body.result == "fixed":
+        i.status = "Verified Closed"
+        i.resolved_at = utcnow()
+        rep = await session.get(User, i.reporter_id)
+        if rep:
+            rep.points += 10
+            rep.reports_valid += 1
+        summary = "Citizen confirmed the issue is fixed — Verified Closed."
+    elif body.result == "partial":
+        i.status = "In Progress"
+        summary = "Citizen reports the issue is only partially fixed — kept open."
+        await _open_review(session, i, kind="resolution",
+                           reason="Citizen says the fix is partial.", ai_confidence=0.0,
+                           conflicts=[], recommended="human_review")
+    else:  # still_exists -> reopen
+        i.status = "Reported"
+        i.reopen_count += 1
+        i.resolved_at = None
+        summary = f"Citizen says the problem still exists — issue reopened (#{i.reopen_count})."
+    await audit(session, actor=user, action="issue.citizen_confirmation", target=f"issue:{issue_id}",
+                ip=client_ip(request), actor_role="citizen", summary=summary,
+                reason=body.note or "", result=body.result)
+    await _recompute_priority(session, i)
+    await session.commit()
+    await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, i, None)})
+    return await issue_public(session, i, user)
+
+
+@app.post("/api/issues/{issue_id}/reopen")
+async def reopen_issue(issue_id: int, request: Request, user: User = Depends(get_current_user),
+                       session: AsyncSession = Depends(get_session)):
+    i = await session.get(Issue, issue_id)
+    if not i:
+        raise HTTPException(404, "Issue not found")
+    if user.id != i.reporter_id and user.role != "authority":
+        raise HTTPException(403, "Not allowed")
+    i.status = "Reported"
+    i.reopen_count += 1
+    i.resolved_at = None
+    i.awaiting_confirmation = False
+    i.citizen_confirmation = "still_exists"
+    await audit(session, actor=user, action="issue.reopen", target=f"issue:{issue_id}",
+                ip=client_ip(request), actor_role=user.role,
+                summary=f"Issue reopened (#{i.reopen_count})",
+                reason="problem still present after being marked resolved")
+    await _recompute_priority(session, i)
+    await session.commit()
+    await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, i, None)})
+    return await issue_public(session, i, user)
+
+
+@app.get("/api/issues/{issue_id}/audit")
+async def issue_audit(issue_id: int, session: AsyncSession = Depends(get_session),
+                      authorization: Optional[str] = Header(default=None)):
+    viewer = await maybe_user(session, authorization)
+    i = await session.get(Issue, issue_id)
+    if not i or not can_view(i, viewer):
+        raise HTTPException(404, "Issue not found")
+    rows = (await session.execute(select(AuditLog).where(AuditLog.target == f"issue:{issue_id}")
+                                  .order_by(AuditLog.ts))).scalars().all()
+    who = {}
+    for r in rows:
+        for uid in (r.actor_id, r.overruled_by):
+            if uid and uid not in who:
+                u = await session.get(User, uid)
+                who[uid] = u.name if u else f"user {uid}"
+    return [{
+        "ts": r.ts.isoformat(), "actor": (who.get(r.actor_id) if r.actor_id else r.actor_role.upper()),
+        "actor_role": r.actor_role, "action": r.action,
+        "what": r.summary or r.action.replace(".", " ").replace("_", " ").title(),
+        "why": r.reason or "", "overruled_by": who.get(r.overruled_by),
+        "meta": r.meta or {},
+    } for r in rows]
+
+
+@app.get("/api/authority/review-queue")
+async def review_queue(_: User = Depends(require_authority), session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(select(HumanReview).where(HumanReview.status == "open")
+                                  .order_by(HumanReview.created_at))).scalars().all()
+    out = []
+    for r in rows:
+        i = await session.get(Issue, r.issue_id)
+        if not i:
+            continue
+        out.append({
+            "id": r.id, "issue_id": r.issue_id, "kind": r.kind, "reason": r.reason,
+            "ai_confidence": round(r.ai_confidence * 100),
+            "evidence_trust": r.evidence_trust, "conflicts": r.conflicts,
+            "recommended_action": r.recommended_action, "created_at": r.created_at.isoformat(),
+            "issue": {"title": i.title, "category": i.category, "priority": i.priority,
+                      "status": i.status, "photo_url": i.photo_url, "after_photo_url": i.after_photo_url,
+                      "consistency": i.consistency},
+        })
+    return out
+
+
+@app.post("/api/authority/review/{review_id}/decide")
+async def review_decide(review_id: int, body: ReviewDecisionIn, request: Request,
+                        actor: User = Depends(require_authority),
+                        session: AsyncSession = Depends(get_session)):
+    r = await session.get(HumanReview, review_id)
+    if not r or r.status != "open":
+        raise HTTPException(404, "Review not found or already decided")
+    i = await session.get(Issue, r.issue_id)
+    r.status = "decided"; r.decision = body.decision; r.decision_note = body.note
+    r.reviewer_id = actor.id; r.decided_at = utcnow()
+    if i:
+        i.in_human_review = bool(await session.scalar(select(HumanReview).where(
+            HumanReview.issue_id == i.id, HumanReview.status == "open", HumanReview.id != review_id)))
+        if body.decision == "approve":
+            if r.kind == "resolution":
+                i.status = "AI Verified — Awaiting Confirmation"; i.awaiting_confirmation = True
+            elif i.status in ("Reported", "Verifying"):
+                i.status = "Verified"; i.verified = True
+        elif body.decision == "reject":
+            i.status = "Rejected"
+        elif body.decision == "reopen":
+            i.status = "Reported"; i.reopen_count += 1; i.resolved_at = None
+        elif body.decision == "escalate":
+            i.priority = "critical"
+        # "request_evidence" leaves status unchanged
+    await audit(session, actor=actor, action="human_review.decision", target=f"issue:{r.issue_id}",
+                ip=client_ip(request), actor_role="authority",
+                summary=f"Human review ({r.kind}): {body.decision.replace('_', ' ')}",
+                reason=body.note or r.reason, overruled_by=actor.id, decision=body.decision)
+    await session.commit()
+    if i:
+        await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, i, None)})
+    return {"ok": True, "decision": body.decision}
+
+
+@app.get("/api/authority/fairness")
+async def authority_fairness(_: User = Depends(require_authority),
+                             session: AsyncSession = Depends(get_session)):
+    issues = (await session.execute(select(Issue))).scalars().all()
+    return ai_wards.fairness(issues, utcnow())
+
+
+# ---- privacy ----
+@app.post("/api/issues/{issue_id}/privacy")
+async def set_privacy(issue_id: int, body: PrivacyIn, user: User = Depends(get_current_user),
+                      session: AsyncSession = Depends(get_session)):
+    i = await session.get(Issue, issue_id)
+    if not i:
+        raise HTTPException(404, "Issue not found")
+    if i.reporter_id != user.id:
+        raise HTTPException(403, "Only the reporter can change privacy on this report")
+    if body.is_public is not None:
+        i.is_public = body.is_public
+    if body.precise_location_public is not None:
+        i.precise_location_public = body.precise_location_public
+    await session.commit()
+    return await issue_public(session, i, user)
+
+
+# ---- Civic Services & Payments (Razorpay TEST / sandbox) ----
+@app.get("/api/payments/config")
+async def payments_config(_: User = Depends(get_current_user)):
+    return pay.public_config()
+
+
+@app.post("/api/payments/create-order")
+async def payments_create_order(body: PaymentOrderIn, user: User = Depends(get_current_user),
+                                session: AsyncSession = Depends(get_session)):
+    svc = pay.SERVICE_MAP.get(body.service_code)
+    if not svc:
+        raise HTTPException(400, "Unknown service")
+    receipt = pay.receipt_no()
+    try:
+        created = await asyncio.to_thread(pay.create_order, svc["amount"], receipt,
+                                          {"service": svc["code"], "user_id": str(user.id)})
+    except Exception as e:
+        raise HTTPException(502, f"Payment provider error: {e}")
+    order = PaymentOrder(
+        user_id=user.id, service_code=svc["code"], service_name=svc["name"],
+        amount=svc["amount"], provider_order_id=created["provider_order_id"],
+        status="created", receipt_no=receipt, mode=created["mode"], meta={"desc": svc["desc"]})
+    session.add(order)
+    await session.commit()
+    return {
+        "order_id": order.id, "provider_order_id": created["provider_order_id"],
+        "amount": svc["amount"], "currency": "INR", "service_name": svc["name"],
+        "receipt_no": receipt, "mode": created["mode"],
+        "key_id": settings.razorpay_key_id if created["mode"] == "test" else "",
+        # only present in simulated mode so the prototype can complete the flow:
+        "simulated_client": pay.simulate_client_payment(created["provider_order_id"])
+        if created["mode"] == "simulated" else None,
+    }
+
+
+@app.post("/api/payments/verify")
+async def payments_verify(body: PaymentVerifyIn, user: User = Depends(get_current_user),
+                          session: AsyncSession = Depends(get_session)):
+    order = await session.get(PaymentOrder, body.order_id)
+    if not order or order.user_id != user.id:
+        raise HTTPException(404, "Order not found")
+    if order.status == "paid":                      # idempotent — no double processing
+        return {"status": "paid", "receipt_no": order.receipt_no, "already": True}
+    if order.provider_order_id != body.razorpay_order_id:
+        raise HTTPException(400, "Order id mismatch")
+    ok = pay.verify_payment_signature(body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature)
+    txn = PaymentTransaction(
+        order_id=order.id, provider_payment_id=body.razorpay_payment_id,
+        provider_signature=body.razorpay_signature, event="verify",
+        method=body.method or "upi", status="captured" if ok else "signature_failed",
+        raw={"verified": ok})
+    session.add(txn)
+    if ok:
+        order.status = "paid"
+        order.provider_payment_id = body.razorpay_payment_id
+        order.updated_at = utcnow()
+    await session.commit()
+    if not ok:
+        raise HTTPException(400, "Payment signature verification failed")
+    return {"status": "paid", "receipt_no": order.receipt_no,
+            "payment_id": body.razorpay_payment_id, "mode": order.mode}
+
+
+@app.post("/api/payments/webhook")
+async def payments_webhook(request: Request, session: AsyncSession = Depends(get_session)):
+    raw = await request.body()
+    sig = request.headers.get("x-razorpay-signature", "")
+    if not pay.verify_webhook_signature(raw, sig):
+        raise HTTPException(400, "Invalid webhook signature")
+    try:
+        event = json.loads(raw)
+    except Exception:
+        raise HTTPException(400, "Bad payload")
+    ent = (event.get("payload", {}).get("payment", {}).get("entity", {}))
+    oid = ent.get("order_id")
+    order = await session.scalar(select(PaymentOrder).where(PaymentOrder.provider_order_id == oid)) if oid else None
+    if order and order.status != "paid" and event.get("event") == "payment.captured":
+        order.status = "paid"
+        order.provider_payment_id = ent.get("id")
+        order.updated_at = utcnow()
+        session.add(PaymentTransaction(order_id=order.id, provider_payment_id=ent.get("id"),
+                                       event="webhook:payment.captured", method=ent.get("method", ""),
+                                       status="captured", raw=event))
+        await session.commit()
+    return {"ok": True}
+
+
+@app.get("/api/payments/history")
+async def payments_history(user: User = Depends(get_current_user),
+                           session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(select(PaymentOrder).where(PaymentOrder.user_id == user.id)
+                                  .order_by(PaymentOrder.created_at.desc()))).scalars().all()
+    return [{
+        "id": o.id, "service": o.service_name, "amount": o.amount, "currency": o.currency,
+        "status": o.status, "transaction_id": o.provider_payment_id or o.provider_order_id,
+        "receipt_no": o.receipt_no, "mode": o.mode, "date": o.created_at.isoformat(),
+    } for o in rows]
+
+
+@app.get("/api/payments/{order_id}/receipt")
+async def payments_receipt(order_id: int, user: User = Depends(get_current_user),
+                           session: AsyncSession = Depends(get_session)):
+    o = await session.get(PaymentOrder, order_id)
+    if not o or o.user_id != user.id:
+        raise HTTPException(404, "Not found")
+    if o.status != "paid":
+        raise HTTPException(400, "Receipt available only for paid transactions")
+    return {
+        "receipt_no": o.receipt_no, "service": o.service_name, "amount": o.amount,
+        "currency": o.currency, "payer": user.name, "payer_email": user.email,
+        "transaction_id": o.provider_payment_id, "order_id": o.provider_order_id,
+        "paid_at": o.updated_at.isoformat(), "mode": o.mode,
+        "issuer": "CivicPulse Civic Services (prototype)",
+        "note": "This is a prototype receipt. " + (
+            "Razorpay TEST transaction — no real money moved."
+            if o.mode == "test" else "Simulated payment — no Razorpay call was made."),
+    }
 
 
 @app.post("/api/authority/rainfall-twin")
