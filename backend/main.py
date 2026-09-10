@@ -32,7 +32,8 @@ import payments as pay
 import analytics as an
 from ai import (registry, verify as ai_verify, dedup as ai_dedup, priority as ai_priority,
                 trust as ai_trust, authenticity as ai_auth, weather as ai_weather,
-                evidence as ai_evidence, resolution as ai_resolution, wards as ai_wards)
+                evidence as ai_evidence, resolution as ai_resolution, wards as ai_wards,
+                nlu as ai_nlu)
 from ai.assistant import assistant, ASSISTANT_NAME, ASSISTANT_TAGLINE
 from ai.text_classifier import embed as text_embed
 from config import settings
@@ -330,6 +331,12 @@ class AssistantIn(BaseModel):
     lng: Optional[float] = None
 
 
+class ParseIn(BaseModel):
+    text: str = Field(min_length=2, max_length=2000)
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
 # --------------------------------------------------------------------------- WS hub
 class Hub:
     def __init__(self):
@@ -407,11 +414,20 @@ async def public_config():
         "categories": list(settings.categories),
         "vision_categories": list(settings.vision_categories),
         "payments_mode": pay.mode(),
+        "languages": [
+            {"code": "en-IN", "label": "English", "native": "English"},
+            {"code": "ta-IN", "label": "Tamil", "native": "தமிழ்"},
+            {"code": "hi-IN", "label": "Hindi", "native": "हिन्दी"},
+            {"code": "te-IN", "label": "Telugu", "native": "తెలుగు"},
+            {"code": "kn-IN", "label": "Kannada", "native": "ಕನ್ನಡ"},
+            {"code": "ml-IN", "label": "Malayalam", "native": "മലയാളം"},
+        ],
         "features": {
             "evidence_trust": True, "multimodal_consistency": True,
             "human_review": True, "resolution_verification": True,
             "citizen_confirmation": True, "fair_priority": True,
             "ward_fairness": True, "ai_audit_trail": True, "payments": True,
+            "voice_reporting": True, "multilingual": True,
         },
         "prototype_notice": "AI components are heuristic prototypes — scores are illustrative "
                             "and Not Yet Measured. Payments run in Razorpay TEST/sandbox or simulated mode.",
@@ -985,6 +1001,26 @@ async def _create_issue(session: AsyncSession, user: User, body: IssueIn, ip: st
     if needs_ai:
         ai_queue.put_nowait((issue.id, photo_path))
     return payload
+
+
+@app.post("/api/report/parse")
+async def parse_spoken_report(body: ParseIn, user: User = Depends(get_current_user),
+                              session: AsyncSession = Depends(get_session)):
+    """Turn a typed/dictated sentence (English / Tamil / romanised Tamil) into
+    structured report fields. Heuristic multilingual NLU — the speech-to-text
+    itself is done on the device by the browser. Nothing is filed here; the
+    citizen reviews and edits before submitting."""
+    parsed = await asyncio.to_thread(ai_nlu.parse, body.text)
+    out = parsed.dict()
+    if body.lat is not None and body.lng is not None:
+        try:
+            out["ward"] = ai_wards.assign(body.lat, body.lng)
+        except Exception:
+            pass
+    out["prototype"] = True
+    out["note"] = ("Understood from your words with a rule-based multilingual parser. "
+                   "Please check the category, severity and description before submitting.")
+    return out
 
 
 @app.post("/api/issues")

@@ -1,7 +1,7 @@
 // Converted from stitch mockup: login_signup/ + civicai_platform/
 import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "../api.jsx";
-import { Icon } from "../ui.jsx";
+import { Icon, LangPicker } from "../ui.jsx";
 
 export default function Login() {
   const { otpRequest, otpVerify, loginPassword } = useAuth();
@@ -63,6 +63,7 @@ export default function Login() {
           </div>
           <h1 className="text-4xl font-black font-headline tracking-tight bg-gradient-to-br from-primary to-primary-container bg-clip-text text-transparent">CiviTrace AI</h1>
           <p className="text-on-variant font-medium mt-2 text-[11px] opacity-80 max-w-[15rem] mx-auto leading-snug">Evidence-Aware Civic Intelligence &amp; Resolution Platform</p>
+          <div className="mt-3 flex justify-center"><LangPicker /></div>
         </header>
 
         <main className="glass-strong p-7 rounded-[28px] shadow-2xl shadow-primary/5 border border-white/50">

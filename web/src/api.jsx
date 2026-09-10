@@ -56,6 +56,31 @@ export async function issuesAround(lat, lng, { radius = 350, category, text } = 
   catch { return { open: [], resolved: [], count: 0, duplicate_candidates: [], recurrence_candidates: [] }; }
 }
 
+// ---- language preference (for voice recognition + a few UI strings) ----
+const LANG_KEY = "civitrace_lang";
+export function getLang() {
+  try { return localStorage.getItem(LANG_KEY) || "en-IN"; } catch { return "en-IN"; }
+}
+export function useLang() {
+  const [lang, setLangState] = useState(getLang);
+  useEffect(() => {
+    const h = () => setLangState(getLang());
+    window.addEventListener("civitrace:lang", h);
+    window.addEventListener("storage", h);
+    return () => { window.removeEventListener("civitrace:lang", h); window.removeEventListener("storage", h); };
+  }, []);
+  const setLang = useCallback((c) => {
+    try { localStorage.setItem(LANG_KEY, c); } catch {}
+    setLangState(c);
+    window.dispatchEvent(new Event("civitrace:lang"));
+  }, []);
+  return [lang, setLang];
+}
+
+// ---- spoken/typed report -> structured fields (multilingual heuristic NLU) ----
+export const parseSpokenReport = (text, lat, lng) =>
+  api("/report/parse", { method: "POST", body: { text, lat, lng } });
+
 // ---- "my area" — the community/locality the citizen is currently looking at ----
 const AREA_KEY = "civicpulse_area";
 export function getArea() {

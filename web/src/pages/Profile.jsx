@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, useAuth } from "../api.jsx";
-import { Icon, Spinner, StatusBadge, SectionLabel, fmtAgo } from "../ui.jsx";
+import { Icon, Spinner, StatusBadge, SectionLabel, LangPicker, fmtAgo } from "../ui.jsx";
 
 const PREF_KEY = "civicpulse_prefs";
 const loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } };
@@ -119,6 +119,12 @@ export default function Profile() {
 
       <section className="space-y-4">
         <SectionLabel>Preferences</SectionLabel>
+        <div className="bg-white rounded-2xl px-3.5 py-3 shadow-sm flex items-center justify-between">
+          <span className="font-semibold text-sm flex items-center gap-2">
+            <Icon name="translate" className="text-primary text-lg" /> Language / voice
+          </span>
+          <LangPicker compact />
+        </div>
         <div className="bg-white rounded-2xl p-2 shadow-sm divide-y divide-surface-high/60">
           {[
             ["folder_open", "My reports", "mine"],

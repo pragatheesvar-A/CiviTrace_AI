@@ -80,9 +80,9 @@ export default function MapView() {
 
   return (
     <div className="-mx-5 -mt-5 relative" style={{ height: "calc(100dvh - 8.5rem)" }}>
-      <MapContainer center={center} zoom={13} zoomControl={false} scrollWheelZoom
+      <MapContainer center={center} zoom={13} zoomControl={false} attributionControl={false} scrollWheelZoom
         className="absolute inset-0 w-full h-full" style={{ borderRadius: 0 }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <MapController fly={fly} />
         {shown.map((i) => (
           <CircleMarker key={i.id} center={[i.lat, i.lng]}

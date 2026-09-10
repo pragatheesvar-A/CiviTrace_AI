@@ -2,11 +2,14 @@
 // with a live "already reported / recently fixed here" check before submit.
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fileToBase64, reverseGeocode, issuesAround, useLiveFeed, getArea } from "../api.jsx";
+import {
+  api, fileToBase64, reverseGeocode, issuesAround, useLiveFeed, getArea, parseSpokenReport,
+} from "../api.jsx";
 import {
   Icon, VerificationChip, ConfidenceMeter, PriorityBadge, SectionLabel,
-  EditorialTitle, GeoInput, Stepper, NearbyList,
+  EditorialTitle, GeoInput, Stepper, NearbyList, VoiceButton, LangPicker,
 } from "../ui.jsx";
+import { t } from "../i18n.jsx";
 
 const CATS = ["Roads", "Water", "Waste", "Electricity", "Safety", "Flooding", "Traffic"];
 const VISION = { Roads: "2-stage CLIP → YOLO pothole pipeline", Flooding: "photo + live rainfall at this GPS point", Traffic: "CLIP signal / junction classifier" };
@@ -29,7 +32,27 @@ export default function Report() {
   const [gps, setGps] = useState(getArea() ? `Using your area: ${getArea().label.split(",")[0]}` : "");
   const [locked, setLocked] = useState(!!getArea());   // area / GPS / picked place set
   const [near, setNear] = useState(null);
+  const [heard, setHeard] = useState("");        // interim transcript
+  const [understood, setUnderstood] = useState(null); // parsed NLU result
+  const [parsing, setParsing] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+
+  async function onVoice(text) {
+    setHeard(text);
+    setParsing(true);
+    try {
+      const p = await parseSpokenReport(text, f.lat, f.lng);
+      setUnderstood(p);
+      setF((s) => ({
+        ...s,
+        category: CATS.includes(p.category) ? p.category : s.category,
+        title: p.title || s.title,
+        description: (s.description ? s.description + " " : "") + (p.description || text),
+      }));
+    } catch {
+      setF((s) => ({ ...s, description: (s.description ? s.description + " " : "") + text }));
+    } finally { setParsing(false); }
+  }
 
   const step = !preview ? 0 : !f.title.trim() ? 1 : !locked ? 2 : 3;
 
@@ -170,8 +193,41 @@ export default function Report() {
 
   return (
     <form onSubmit={submit} className="space-y-7">
-      <EditorialTitle top="Report" accent="An Issue." sub="Four quick steps. We check it isn't already reported before you submit." />
-      <Stepper steps={["Photo", "Details", "Place", "Review"]} current={step} />
+      <div className="flex items-start justify-between gap-3">
+        <EditorialTitle top={t("Report")} accent={t("An Issue.")} sub="Speak or type — we check it isn't already reported before you submit." />
+        <LangPicker compact />
+      </div>
+      <Stepper steps={[t("Photo"), t("Details"), t("Place"), t("Review")]} current={step} />
+
+      <section className="bg-white rounded-3xl p-4 shadow-sm card-line space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-bold flex items-center gap-1.5">
+            <Icon name="record_voice_over" className="text-primary" fill /> {t("Speak your report")}
+          </p>
+          <span className="text-[10px] text-slate-400">on-device speech · prototype</span>
+        </div>
+        <VoiceButton label={t("Speak your report")}
+          onInterim={(x) => setHeard(x)}
+          onResult={onVoice} />
+        <p className="text-xs text-on-variant">
+          {parsing ? "Understanding…" : heard
+            ? `“${heard}”`
+            : t("Tap the mic and describe the problem")}
+        </p>
+        {understood && (
+          <div className="rounded-xl bg-primary/5 p-3 text-xs space-y-1 fadeup">
+            <p className="font-bold text-primary flex items-center gap-1">
+              <Icon name="auto_awesome" className="text-sm" /> {t("We understood")}
+            </p>
+            <p>{t("Category")}: <b>{t(understood.category)}</b> · {t("Severity")}: <b>{t(understood.severity)}</b>
+              {understood.language ? <> · <span className="uppercase">{understood.language}</span></> : null}</p>
+            {understood.matched?.length > 0 && (
+              <p className="text-on-variant">heard: {understood.matched.join(", ")}</p>
+            )}
+            <p className="text-[10px] text-slate-400">{understood.note}</p>
+          </div>
+        )}
+      </section>
 
       <section className="relative">
         <button type="button" onClick={() => fileRef.current?.click()}
@@ -181,7 +237,7 @@ export default function Report() {
             : (
               <span className="flex flex-col items-center gap-3 text-primary">
                 <span className="p-5 rounded-full bg-primary/10"><Icon name="add_a_photo" className="text-4xl" fill /></span>
-                <span className="font-semibold tracking-widest uppercase text-xs">Add a photo of the problem</span>
+                <span className="font-semibold tracking-widest uppercase text-xs">{t("Add a photo of the problem")}</span>
                 <span className="text-[11px] text-on-variant normal-case tracking-normal">A clear photo lets the AI verify it automatically</span>
               </span>
             )}
@@ -196,12 +252,12 @@ export default function Report() {
       </section>
 
       <section>
-        <SectionLabel>What kind of problem?</SectionLabel>
+        <SectionLabel>{t("What kind of problem?")}</SectionLabel>
         <div className="flex flex-wrap gap-2.5">
           {CATS.map((c) => (
             <button type="button" key={c} onClick={() => setF((s) => ({ ...s, category: c }))}
               className={`px-5 py-2.5 rounded-full font-semibold text-sm transition-all ${f.category === c ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-white text-on-variant shadow-sm"}`}>
-              {c}
+              {t(c)}
             </button>
           ))}
         </div>
@@ -213,23 +269,23 @@ export default function Report() {
       </section>
 
       <section>
-        <SectionLabel>Title</SectionLabel>
+        <SectionLabel>{t("Title")}</SectionLabel>
         <input required value={f.title} onChange={set("title")} placeholder="e.g. Deep pothole on Anna Salai"
           className="w-full bg-white shadow-sm border-none rounded-2xl py-4 px-5 focus:ring-2 focus:ring-primary/30 outline-none" />
       </section>
 
       <section>
-        <SectionLabel>Description</SectionLabel>
+        <SectionLabel>{t("Description")}</SectionLabel>
         <textarea value={f.description} onChange={set("description")} rows={4} placeholder="Describe the problem and how urgent it is…"
           className="w-full bg-white shadow-sm border-none rounded-2xl py-4 px-5 focus:ring-2 focus:ring-primary/30 outline-none resize-none" />
       </section>
 
       <section>
         <div className="flex justify-between items-end mb-3">
-          <SectionLabel>Where is it?</SectionLabel>
+          <SectionLabel>{t("Where is it?")}</SectionLabel>
           <button type="button" onClick={locate}
             className="flex items-center gap-1.5 text-primary font-bold text-xs bg-primary/10 px-3 py-1.5 rounded-full">
-            <Icon name="my_location" className="text-sm" /> Use GPS
+            <Icon name="my_location" className="text-sm" /> {t("Use GPS")}
           </button>
         </div>
         <GeoInput value={f.address}
@@ -284,7 +340,7 @@ export default function Report() {
       {err && <p className="text-error text-sm font-medium">{err}</p>}
       <button type="submit" disabled={busy || !f.title.trim()}
         className="w-full py-5 rounded-full bg-gradient-to-br from-primary to-primary-container text-white font-headline text-lg font-bold shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-50">
-        {busy ? "Submitting…" : "Submit issue"}
+        {busy ? t("Submitting…") : t("Submit issue")}
       </button>
     </form>
   );

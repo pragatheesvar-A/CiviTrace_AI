@@ -34,6 +34,7 @@ h1, h2, h3, .font-headline { font-family: "Space Grotesk", system-ui, sans-serif
 .glass-strong { background: rgba(250,249,246,0.9); backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5); border: 1px solid rgba(26,28,26,0.05); }
 
 .leaflet-container { border-radius: 0; font-family: inherit; }
+.leaflet-control-attribution { display: none !important; }
 ::-webkit-scrollbar { width: 0; height: 0; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 

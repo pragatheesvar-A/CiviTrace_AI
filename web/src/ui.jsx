@@ -1,6 +1,6 @@
 // Converted from stitch mockup: offline_mode_state/ (OfflineBanner) + shared design-system primitives
 import React, { useEffect, useRef, useState } from "react";
-import { geocode, reverseGeocode, useArea } from "./api.jsx";
+import { geocode, reverseGeocode, useArea, useLang, getLang, useConfig } from "./api.jsx";
 
 export const Icon = ({ name, className = "", fill = false, ...rest }) => (
   <span className={`material-symbols-outlined ${fill ? "fill" : ""} ${className}`} {...rest}>{name}</span>
@@ -455,6 +455,83 @@ export function GeoInput({ value, onChange, onPick, near, placeholder = "Search 
         </div>
       )}
     </div>
+  );
+}
+
+// Language picker — sets the speech-recognition language + a few UI strings.
+export function LangPicker({ compact }) {
+  const cfg = useConfig();
+  const [lang, setLang] = useLang();
+  const langs = cfg?.languages || [{ code: "en-IN", label: "English", native: "English" }];
+  const cur = langs.find((l) => l.code === lang) || langs[0];
+  return (
+    <label className={`inline-flex items-center gap-1.5 ${compact ? "" : "bg-white card-line rounded-full px-3 py-2"}`}>
+      <Icon name="translate" className="text-primary text-base" />
+      <select value={lang} onChange={(e) => setLang(e.target.value)}
+        className="bg-transparent border-none text-sm font-semibold outline-none focus:ring-0 pr-1"
+        aria-label="Language">
+        {langs.map((l) => (
+          <option key={l.code} value={l.code}>{l.native}{l.native !== l.label ? ` · ${l.label}` : ""}</option>
+        ))}
+      </select>
+      {compact && cur && <span className="sr-only">{cur.label}</span>}
+    </label>
+  );
+}
+
+// Voice capture button — uses the browser's on-device Web Speech API.
+// onResult(finalText) fires when the user stops speaking.
+export function VoiceButton({ onResult, onInterim, label = "Speak", className = "" }) {
+  const [lang] = useLang();
+  const [listening, setListening] = useState(false);
+  const [supported, setSupported] = useState(true);
+  const recRef = useRef(null);
+
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setSupported(false); return; }
+    const r = new SR();
+    r.lang = lang || getLang();
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+    r.continuous = false;
+    r.onresult = (e) => {
+      let finalT = "", interimT = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const tr = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalT += tr; else interimT += tr;
+      }
+      if (interimT) onInterim?.(interimT);
+      if (finalT) onResult?.(finalT.trim());
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    recRef.current = r;
+    return () => { try { r.abort(); } catch {} };
+  }, [lang, onResult, onInterim]);
+
+  if (!supported) {
+    return (
+      <p className="text-xs text-on-variant flex items-center gap-1">
+        <Icon name="mic_off" className="text-sm" /> Voice input isn't available in this browser — please type instead.
+      </p>
+    );
+  }
+  const toggle = () => {
+    const r = recRef.current;
+    if (!r) return;
+    if (listening) { try { r.stop(); } catch {} setListening(false); return; }
+    try { r.lang = getLang(); r.start(); setListening(true); } catch {}
+  };
+  return (
+    <button type="button" onClick={toggle}
+      className={className || `flex items-center gap-2 px-4 py-2.5 rounded-full font-bold text-sm transition-colors ${
+        listening ? "bg-error text-white" : "bg-primary text-white"}`}>
+      <span className={`relative flex items-center justify-center ${listening ? "sos-pulse rounded-full" : ""}`}>
+        <Icon name={listening ? "graphic_eq" : "mic"} className="text-lg" fill />
+      </span>
+      {listening ? "Listening…" : label}
+    </button>
   );
 }
 
