@@ -55,14 +55,6 @@ export default function Home() {
           </div>
           <Icon name="chevron_right" />
         </Link>
-        <Link to="/emergency"
-          className="col-span-2 p-5 rounded-2xl bg-error text-white shadow-lg shadow-error/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Icon name="emergency" className="text-2xl" fill />
-            <span className="font-bold text-lg">Emergency Help</span>
-          </div>
-          <Icon name="chevron_right" />
-        </Link>
       </section>
 
       <section className="space-y-4">
@@ -122,6 +114,18 @@ export default function Home() {
           ))}
         </section>
       )}
+
+      {/* Emergency — kept low-key and near the bottom; the header also has a quick SOS icon */}
+      <Link to="/emergency"
+        className="flex items-center justify-between rounded-xl px-4 py-3 bg-white card-line active:scale-[0.99] transition-transform">
+        <span className="flex items-center gap-2.5 text-sm font-semibold text-on-variant">
+          <span className="w-7 h-7 rounded-full bg-error/10 flex items-center justify-center">
+            <Icon name="e911_emergency" className="text-error text-base" fill />
+          </span>
+          Life-threatening emergency? Open SOS
+        </span>
+        <Icon name="chevron_right" className="text-slate-300" />
+      </Link>
     </div>
   );
 }
