@@ -282,6 +282,57 @@ export function ResolutionCard({ issue }) {
   );
 }
 
+// Explainable priority breakdown for authority users.
+export function PriorityBreakdown({ issue }) {
+  const pe = issue.priority_explanation || {};
+  const score = Math.round((issue.priority_score || 0) * 100);
+  const sev = issue.severity ? Math.round(issue.severity * 100)
+    : issue.detection_count >= 2 ? 75 : issue.verified ? 55 : 35;
+  const evid = issue.evidence_trust || Math.round((issue.verification_confidence || 0) * 100) || 40;
+  const community = Math.min(100, (issue.upvotes || 0) * 12 + Math.max(0, (issue.cluster_count || 1) - 1) * 18);
+  const ageDays = pe.contributions?.issue_age_days || 0;
+  const persistence = Math.min(100, 30 + ageDays * 4 + (issue.recurrence ? 40 : 0));
+  const impact = /school|hospital|child|market|junction|highway/i.test(
+    `${issue.title} ${issue.description} ${issue.address}`) ? 92
+    : ["Flooding", "Electricity", "Safety", "Traffic"].includes(issue.category) ? 78 : 55;
+  const rows = [
+    ["Severity", sev], ["Evidence confidence", evid], ["Community confirmation", community],
+    ["Persistence / age", persistence], ["Public impact", impact],
+  ];
+  const tone = (v) => v >= 75 ? "#c0362c" : v >= 50 ? "#c2703d" : "#0d5c63";
+  return (
+    <div className="bg-white rounded-2xl p-4 shadow-sm card-line">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-variant">Priority breakdown</p>
+        <span className="text-lg font-black font-headline">{score}<span className="text-xs text-on-variant">/100</span></span>
+      </div>
+      <div className="space-y-1.5">
+        {rows.map(([label, v]) => (
+          <div key={label} className="flex items-center gap-2">
+            <span className="text-[11px] w-32 shrink-0 text-on-variant">{label}</span>
+            <div className="flex-1 h-2.5 bg-surface-high rounded-full overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${v}%`, background: tone(v) }} />
+            </div>
+            <span className="text-[11px] font-bold w-7 text-right">{Math.round(v)}</span>
+          </div>
+        ))}
+      </div>
+      {Array.isArray(pe.rule_overrides) && pe.rule_overrides.length > 0 && (
+        <ul className="mt-2 pt-2 border-t border-surface-high space-y-0.5">
+          {pe.rule_overrides.map((r, n) => (
+            <li key={n} className="text-[11px] text-on-variant flex items-start gap-1">
+              <Icon name="rule" className="text-xs mt-px text-primary" />{r}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[10px] text-slate-400 mt-2">
+        {pe.method || "model+rules"} · transparent scoring (prototype — components illustrative)
+      </p>
+    </div>
+  );
+}
+
 export function AuditTimeline({ rows }) {
   if (!rows || rows.length === 0) return <p className="text-sm text-on-variant">No history yet.</p>;
   const icon = (a) => a.startsWith("ai.") ? "smart_toy" : a.includes("status") ? "flag"

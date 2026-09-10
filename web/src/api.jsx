@@ -90,6 +90,12 @@ export const reviewDecide = (rid, decision, note = "") =>
   api(`/authority/review/${rid}/decide`, { method: "POST", body: { decision, note } });
 export const fairnessReport = () => api("/authority/fairness");
 export const authorityAudit = () => api("/authority/audit");
+export const authorityAnalytics = (range = "30d", start, end) => {
+  const p = new URLSearchParams({ range });
+  if (start) p.set("start", start);
+  if (end) p.set("end", end);
+  return api(`/authority/analytics?${p}`);
+};
 
 // ---- civic services & payments (Razorpay TEST / simulated) ----
 export const paymentsConfig = () => api("/payments/config");

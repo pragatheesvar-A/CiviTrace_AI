@@ -3,21 +3,31 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   api, useLiveFeed, reviewQueue, reviewDecide, fairnessReport, authorityAudit,
+  authorityAnalytics,
 } from "../api.jsx";
 import {
   Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, ConsistencyBadge,
   AuditTimeline, fmtAgo,
 } from "../ui.jsx";
+import { Panel, Empty, KpiCard, LineChart, BarChart, DonutChart } from "../charts.jsx";
 
 const TABS = [
+  ["analytics", "Analytics", "monitoring"],
   ["triage", "Triage", "inbox"],
   ["review", "Review Queue", "gavel"],
   ["fairness", "Fairness", "balance"],
   ["audit", "AI Audit", "history"],
 ];
+const RANGES = [["today", "Today"], ["7d", "7d"], ["30d", "30d"], ["90d", "90d"], ["all", "All"]];
+const CAT_COLOR = "#0d5c63";
+const STATUS_COLORS = {
+  Reported: "#8a8b83", Verifying: "#8a8b83", Verified: "#0d5c63", Assigned: "#3f6f8f",
+  "In Progress": "#c2703d", "AI Verified — Awaiting Confirmation": "#12868f",
+  Resolved: "#1f7a4d", "Verified Closed": "#1f7a4d", Rejected: "#c0362c",
+};
 
 export default function Authority() {
-  const [tab, setTab] = useState("triage");
+  const [tab, setTab] = useState("analytics");
   const [kpis, setKpis] = useState(null);
   const [queue, setQueue] = useState(null);
   const [reviews, setReviews] = useState(null);
@@ -25,14 +35,21 @@ export default function Authority() {
   const [audit, setAudit] = useState(null);
   const [rain, setRain] = useState(40);
   const [twin, setTwin] = useState(null);
+  const [range, setRange] = useState("30d");
+  const [ana, setAna] = useState(null);
 
   const load = useCallback(() => {
     api("/authority/kpis").then(setKpis).catch(() => {});
     api("/authority/queue").then(setQueue).catch(() => {});
     reviewQueue().then(setReviews).catch(() => setReviews([]));
   }, []);
+  const loadAna = useCallback((r) => {
+    setAna(null);
+    authorityAnalytics(r).then(setAna).catch(() => setAna({ error: true }));
+  }, []);
   useEffect(() => { load(); }, [load]);
-  useLiveFeed(useCallback(() => load(), [load]));
+  useEffect(() => { loadAna(range); }, [range, loadAna]);
+  useLiveFeed(useCallback(() => { load(); loadAna(range); }, [load, loadAna, range]));
   useEffect(() => { if (tab === "fairness" && !fair) fairnessReport().then(setFair).catch(() => setFair({ wards: [] })); }, [tab, fair]);
   useEffect(() => { if (tab === "audit" && !audit) authorityAudit().then(setAudit).catch(() => setAudit([])); }, [tab, audit]);
   useEffect(() => {
@@ -47,7 +64,10 @@ export default function Authority() {
 
   return (
     <div className="space-y-5 pb-6">
-      <h1 className="text-[2.3rem] leading-[1.05] font-bold tracking-tight">Authority<br /><span className="text-primary">Hub.</span></h1>
+      <div>
+        <h1 className="text-[2.3rem] leading-[1.05] font-bold tracking-tight">Authority<br /><span className="text-primary">Hub.</span></h1>
+        <p className="text-on-variant text-xs mt-1">Evidence-Aware Civic Intelligence &amp; Resolution Platform</p>
+      </div>
 
       <div className="grid grid-cols-3 gap-2">
         <Kpi label="Open" value={kpis.open} />
@@ -69,6 +89,10 @@ export default function Authority() {
           </button>
         ))}
       </div>
+
+      {tab === "analytics" && (
+        <AnalyticsView data={ana} range={range} setRange={setRange} />
+      )}
 
       {tab === "triage" && (
         <>
@@ -198,5 +222,161 @@ const Kpi = ({ label, value, warn }) => (
   <div className={`rounded-2xl p-3 shadow-sm card-line ${warn ? "bg-orange-500/10" : "bg-white"}`}>
     <p className={`text-xl font-black font-headline ${warn ? "text-orange-600" : ""}`}>{value}</p>
     <p className="text-[10px] text-on-variant uppercase tracking-wide">{label}</p>
+  </div>
+);
+
+const day = (d) => d == null ? "—" : `${d}d`;
+const pct = (v) => v == null ? "—" : `${v}%`;
+
+function AnalyticsView({ data, range, setRange }) {
+  const [areaOpen, setAreaOpen] = useState(null);
+  if (data?.error) return <Empty text="Could not load analytics." />;
+  if (!data) return <Spinner label="Crunching the numbers…" />;
+
+  const k = data.kpis, ra = data.resolution_analytics, ts = data.time_series;
+  const catRows = Object.entries(data.by_category).sort((a, b) => b[1] - a[1])
+    .map(([label, value]) => ({ label, value, color: CAT_COLOR }));
+  const statusSlices = Object.entries(data.by_status)
+    .map(([label, value]) => ({ label, value, color: STATUS_COLORS[label] || "#8a8b83" }));
+  const priRows = Object.entries(data.by_priority)
+    .map(([label, value]) => ({ label: label[0].toUpperCase() + label.slice(1), value }));
+  const perfRows = Object.entries(data.resolution_perf).sort((a, b) => b[1] - a[1])
+    .map(([label, value]) => ({ label, value, color: "#c2703d" }));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+        {RANGES.map(([v, l]) => (
+          <button key={v} onClick={() => setRange(v)}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold ${range === v ? "bg-primary text-white" : "bg-white card-line text-on-variant"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <KpiCard label="Total reports" value={k.total} />
+        <KpiCard label="Verified" value={k.verified} tone="#0d5c63" />
+        <KpiCard label="Resolved" value={k.resolved} tone="#1f7a4d" />
+        <KpiCard label="Reopened" value={k.reopened} tone={k.reopened ? "#c2703d" : undefined} />
+        <KpiCard label="Open" value={k.open} />
+        <KpiCard label="In progress" value={k.in_progress} />
+        <KpiCard label="High priority" value={k.high_priority} tone={k.high_priority ? "#c0362c" : undefined} />
+        <KpiCard label="Community confirmations" value={k.community_confirmations} />
+        <KpiCard label="Avg resolution" value={day(k.avg_resolution_days)} />
+        <KpiCard label="Avg evidence trust" value={k.avg_evidence_trust ?? "—"} sub="/100" />
+      </div>
+
+      <Panel title="Issues reported over time" hint={`${ts.labels.length} days`}>
+        <LineChart labels={ts.labels} series={[{ name: "Reported", data: ts.reported }]} />
+      </Panel>
+
+      <Panel title="Resolution trend" hint="resolved vs reopened">
+        <LineChart labels={ts.labels} series={[
+          { name: "Resolved", data: ts.resolved, color: "#1f7a4d" },
+          { name: "Reopened", data: ts.reopened, color: "#c0362c" },
+        ]} />
+      </Panel>
+
+      <Panel title="Issues by category">
+        <BarChart rows={catRows} />
+      </Panel>
+
+      <Panel title="Status distribution">
+        <DonutChart slices={statusSlices} />
+      </Panel>
+
+      <Panel title="Priority distribution">
+        <BarChart rows={priRows.map((r) => ({
+          ...r, color: { Critical: "#c0362c", High: "#c2703d", Medium: "#0d5c63", Low: "#8a8b83" }[r.label],
+        }))} />
+      </Panel>
+
+      <Panel title="Resolution performance" hint="avg days to resolve, by category">
+        <BarChart rows={perfRows} unit="d" />
+      </Panel>
+
+      <Panel title="Community validation" hint="citizen confirmations over time">
+        <LineChart labels={data.community_validation.labels}
+          series={[{ name: "Confirmations", data: data.community_validation.confirmations, color: "#12868f" }]} />
+      </Panel>
+
+      <Panel title="Resolution Analytics">
+        {ra.total_resolved === 0 ? <Empty /> : (
+          <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
+            <Stat2 label="Resolution rate" value={pct(ra.resolution_rate)} big />
+            <Stat2 label="Avg resolution time" value={day(ra.avg_resolution_days)} big />
+            <Stat2 label="AI-verified resolutions" value={ra.ai_verified_resolutions} />
+            <Stat2 label="Citizen-confirmed" value={ra.citizen_confirmed_resolutions} />
+            <Stat2 label="Successfully closed" value={ra.successfully_closed} />
+            <Stat2 label="Reopened after resolution" value={ra.reopened_after_resolution} />
+            <Stat2 label="Fastest resolution" value={day(ra.fastest_resolution_days)} />
+            <Stat2 label="Slowest resolution" value={day(ra.slowest_resolution_days)} />
+            <Stat2 label="Avg resolution confidence" value={ra.avg_resolution_confidence == null ? "—" : `${ra.avg_resolution_confidence}/100`} />
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Area-wise civic intelligence" hint="click an area for its breakdown">
+        {data.area_performance.length === 0 ? <Empty /> : (
+          <div className="overflow-x-auto no-scrollbar -mx-1">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-on-variant text-left">
+                  <th className="py-1 pl-1">Area</th><th>Total</th><th>Open</th><th>Res.</th><th>Reop.</th><th className="pr-1 text-right">Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.area_performance.map((a) => (
+                  <React.Fragment key={a.area}>
+                    <tr onClick={() => setAreaOpen(areaOpen === a.area ? null : a.area)}
+                      className="border-t border-surface-high/60 active:bg-surface-low cursor-pointer">
+                      <td className="py-1.5 pl-1 font-semibold">{a.area}</td>
+                      <td>{a.total}</td><td>{a.open}</td><td>{a.resolved}</td>
+                      <td className={a.reopened ? "text-orange-600 font-bold" : ""}>{a.reopened}</td>
+                      <td className="pr-1 text-right font-bold" style={{ color: a.resolution_rate >= 70 ? "#1f7a4d" : a.resolution_rate >= 40 ? "#c2703d" : "#c0362c" }}>
+                        {a.resolution_rate}%
+                      </td>
+                    </tr>
+                    {areaOpen === a.area && (
+                      <tr className="bg-surface-low">
+                        <td colSpan={6} className="p-2 text-on-variant">
+                          {a.total} issues · {a.open} open · {a.resolved} resolved · {a.reopened} reopened ·
+                          avg fix {day(a.avg_resolution_days)} · mostly {a.dominant_priority} priority
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="AI Insights" hint="rule-based (prototype), generated from the data above">
+        {data.insights.length === 0
+          ? <Empty text="Not enough data for insights yet." />
+          : (
+            <ul className="space-y-2">
+              {data.insights.map((ins, n) => (
+                <li key={n} className="flex items-start gap-2 text-sm">
+                  <Icon name="lightbulb" className="text-accent text-base mt-px" fill />
+                  <span className="text-on-surface">{ins.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </Panel>
+
+      <p className="text-[10px] text-slate-400 text-center">{data.note}</p>
+    </div>
+  );
+}
+
+const Stat2 = ({ label, value, big }) => (
+  <div>
+    <p className={`font-black font-headline ${big ? "text-2xl" : "text-lg"}`}>{value}</p>
+    <p className="text-[11px] text-on-variant">{label}</p>
   </div>
 );

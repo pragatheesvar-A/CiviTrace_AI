@@ -8,7 +8,7 @@ import {
 import {
   Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, ConfidenceMeter,
   AuthenticityChip, RecurrenceBanner, EtaChip, EvidenceTrust, ConsistencyBadge,
-  ResolutionCard, AuditTimeline, fmtAgo,
+  ResolutionCard, AuditTimeline, PriorityBreakdown, fmtAgo,
 } from "../ui.jsx";
 
 const FLOW = ["Verifying", "Verified", "Assigned", "In Progress", "AI Verified — Awaiting Confirmation", "Verified Closed"];
@@ -232,6 +232,8 @@ export default function IssueDetail() {
             })}
           </div>
         </div>
+
+        {user.role === "authority" && <PriorityBreakdown issue={i} />}
 
         {user.role === "authority" && (
           <div className="bg-primary/5 rounded-2xl p-4 space-y-2">

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import auth as A
 import payments as pay
+import analytics as an
 from ai import (registry, verify as ai_verify, dedup as ai_dedup, priority as ai_priority,
                 trust as ai_trust, authenticity as ai_auth, weather as ai_weather,
                 evidence as ai_evidence, resolution as ai_resolution, wards as ai_wards)
@@ -1524,6 +1525,36 @@ async def authority_fairness(_: User = Depends(require_authority),
                              session: AsyncSession = Depends(get_session)):
     issues = (await session.execute(select(Issue))).scalars().all()
     return ai_wards.fairness(issues, utcnow())
+
+
+@app.get("/api/authority/analytics")
+async def authority_analytics(range: str = "30d", start: Optional[str] = None,
+                              end: Optional[str] = None,
+                              _: User = Depends(require_authority),
+                              session: AsyncSession = Depends(get_session)):
+    """Live analytics for the Authority dashboard — computed from the DB.
+    range: today | 7d | 30d | 90d | all | custom (custom needs start/end ISO dates)."""
+    now = utcnow()
+    issues = (await session.execute(select(Issue))).scalars().all()
+    vrows = (await session.execute(
+        select(Vote.issue_id, func.count()).where(Vote.kind == "up").group_by(Vote.issue_id))).all()
+    votes_by_issue = {iid: n for iid, n in vrows}
+
+    since = until = None
+    if range == "custom":
+        try:
+            since = datetime.fromisoformat(start) if start else None
+            until = datetime.fromisoformat(end) if end else None
+            if since and not since.tzinfo:
+                since = since.replace(tzinfo=timezone.utc)
+            if until and not until.tzinfo:
+                until = until.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "start/end must be ISO dates")
+    elif range != "all":
+        since = an.range_start(range, now)
+
+    return an.compute(issues, votes_by_issue, now, since=since, until=until)
 
 
 # ---- privacy ----

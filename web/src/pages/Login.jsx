@@ -62,7 +62,7 @@ export default function Login() {
             <Icon name="monitoring" className="text-3xl" fill />
           </div>
           <h1 className="text-4xl font-black font-headline tracking-tight bg-gradient-to-br from-primary to-primary-container bg-clip-text text-transparent">CiviTrace AI</h1>
-          <p className="text-on-variant font-medium mt-2 tracking-widest text-[11px] uppercase opacity-80">AI-verified civic reporting</p>
+          <p className="text-on-variant font-medium mt-2 text-[11px] opacity-80 max-w-[15rem] mx-auto leading-snug">Evidence-Aware Civic Intelligence &amp; Resolution Platform</p>
         </header>
 
         <main className="glass-strong p-7 rounded-[28px] shadow-2xl shadow-primary/5 border border-white/50">

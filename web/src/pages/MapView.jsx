@@ -6,7 +6,18 @@ import { api, useLiveFeed, issuesAround, useArea } from "../api.jsx";
 import { Spinner, Icon, PriorityBadge, GeoInput, NearbyList } from "../ui.jsx";
 
 const CATS = ["All", "Roads", "Water", "Waste", "Electricity", "Safety", "Flooding", "Traffic"];
-const COLOR = { critical: "#ba1a1a", high: "#ea580c", medium: "#0058bc", low: "#94a3b8" };
+const STATUSES = ["Any", "Open", "Verified", "In Progress", "Resolved", "Reopened", "Critical"];
+const COLOR = { critical: "#c0362c", high: "#c2703d", medium: "#0d5c63", low: "#94a3b8" };
+const OPEN_SET = ["Reported", "Verifying", "Verified", "Assigned", "In Progress", "AI Verified — Awaiting Confirmation"];
+function matchStatus(i, s) {
+  if (s === "Any") return true;
+  if (s === "Open") return OPEN_SET.includes(i.status);
+  if (s === "Resolved") return i.status === "Resolved" || i.status === "Verified Closed";
+  if (s === "Reopened") return (i.reopen_count || 0) > 0;
+  if (s === "Critical") return i.priority === "critical";
+  if (s === "Verified") return i.verified || i.status === "Verified" || i.status === "Verified Closed";
+  return i.status === s;
+}
 
 function MapController({ fly }) {
   const map = useMap();
@@ -24,6 +35,7 @@ export default function MapView() {
   const [area, setArea] = useArea();
   const [issues, setIssues] = useState(null);
   const [cat, setCat] = useState("All");
+  const [stat, setStat] = useState("Any");
   const [q, setQ] = useState(area ? area.label.split(",")[0] : "");
   const [fly, setFly] = useState(null);
   const [place, setPlace] = useState(null);   // { label, lat, lng, around, loading }
@@ -57,8 +69,8 @@ export default function MapView() {
       const ids = new Set([...(place.around.open || []), ...(place.around.resolved || [])].map((x) => x.id));
       list = list.filter((i) => ids.has(i.id));
     }
-    return list.filter((i) => cat === "All" || i.category === cat);
-  }, [issues, cat, place]);
+    return list.filter((i) => (cat === "All" || i.category === cat) && matchStatus(i, stat));
+  }, [issues, cat, stat, place]);
   const center = useMemo(
     () => (area ? [area.lat, area.lng]
       : issues && issues.length ? [issues[0].lat, issues[0].lng] : [13.0604, 80.2496]),
@@ -95,6 +107,14 @@ export default function MapView() {
             <button key={c} onClick={() => setCat(c)}
               className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap shadow-sm ${cat === c ? "bg-primary text-white" : "glass-strong text-on-variant"}`}>
               {c}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+          {STATUSES.map((s) => (
+            <button key={s} onClick={() => setStat(s)}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap shadow-sm ${stat === s ? "bg-on-surface text-white" : "glass-strong text-on-variant"}`}>
+              {s}
             </button>
           ))}
         </div>
