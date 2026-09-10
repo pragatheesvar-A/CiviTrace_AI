@@ -193,7 +193,7 @@ export default function Profile() {
           className="w-full py-4 rounded-full border border-outline-variant/20 text-error font-bold hover:bg-error/5 transition-colors">
           Sign out
         </button>
-        <p className="text-center text-[10px] text-slate-400 uppercase tracking-[0.3em]">CivicPulse v1.0</p>
+        <p className="text-center text-[10px] text-slate-400 uppercase tracking-[0.3em]">CiviTrace AI v1.0</p>
       </section>
     </div>
   );

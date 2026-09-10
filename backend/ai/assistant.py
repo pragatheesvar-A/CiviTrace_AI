@@ -3,7 +3,7 @@ CIVIA — Civic Intelligence Assistant.
 
 A deliberately **non-generative** assistant: it never free-writes prose. Every
 reply is composed from a small reviewed template catalogue, filled only with
-values read live from the CivicPulse database. Hallucination is impossible by
+values read live from the CiviTrace AI database. Hallucination is impossible by
 construction — the property that matters for a public-sector deployment and the
 core novelty claim of this system.
 
@@ -147,7 +147,7 @@ _SAFETY = {
 _TEMPLATES = {
     "greet": "Namaste — I'm {name}, your {tagline}. I can file a report with you, "
              "track one, explain how the AI graded it, or brief you on any area. "
-             "Everything I say comes straight from the CivicPulse database.",
+             "Everything I say comes straight from the CiviTrace AI database.",
     "help": "Here's what I can do — all grounded in real data:\n"
             "• File a report (I'll pre-fill from what you tell me)\n"
             "• Status of your reports — “status of #7”\n"

@@ -37,6 +37,6 @@ if __name__ == "__main__":
         uvicorn.run("main:app", host="::", port=PORT, reload=True)
     else:
         sock = _dual_stack_socket(PORT)
-        print(f"CivicPulse API  ->  http://localhost:{PORT}   http://127.0.0.1:{PORT}")
+        print(f"CiviTrace AI API  ->  http://localhost:{PORT}   http://127.0.0.1:{PORT}")
         config = uvicorn.Config("main:app", log_level="info")
         uvicorn.Server(config).run(sockets=[sock])

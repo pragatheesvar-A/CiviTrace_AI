@@ -72,7 +72,7 @@ function Shell({ children }) {
             </div>
             <div className="leading-none">
               <span className="text-[17px] font-bold font-headline text-on-surface tracking-tight">
-                Civic<span className="text-primary">Pulse</span>
+Civi<span className="text-primary">Trace</span> AI
               </span>
               {user?.role === "authority" &&
                 <span className="block text-[9px] font-bold uppercase tracking-[0.2em] text-primary mt-0.5">Authority</span>}
@@ -107,7 +107,7 @@ export default function App() {
   const { user, loading } = useAuth();
   useLocation(); // keep Shell subscribed to route changes without remounting children
   if (loading) {
-    return <div className="min-h-screen grid place-items-center"><div className="mesh-bg" /><Spinner label="Starting CivicPulse…" /></div>;
+    return <div className="min-h-screen grid place-items-center"><div className="mesh-bg" /><Spinner label="Starting CiviTrace AI…" /></div>;
   }
   if (!user) return <Login />;
   return (

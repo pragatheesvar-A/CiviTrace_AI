@@ -56,6 +56,27 @@ export async function issuesAround(lat, lng, { radius = 350, category, text } = 
   catch { return { open: [], resolved: [], count: 0, duplicate_candidates: [], recurrence_candidates: [] }; }
 }
 
+// ---- "my area" — the community/locality the citizen is currently looking at ----
+const AREA_KEY = "civicpulse_area";
+export function getArea() {
+  try { return JSON.parse(localStorage.getItem(AREA_KEY)) || null; } catch { return null; }
+}
+export function useArea() {
+  const [area, setAreaState] = useState(getArea);
+  useEffect(() => {
+    const h = (e) => { if (e.key === AREA_KEY) setAreaState(getArea()); };
+    window.addEventListener("storage", h);
+    window.addEventListener("civicpulse:area", () => setAreaState(getArea()));
+    return () => window.removeEventListener("storage", h);
+  }, []);
+  const setArea = useCallback((a) => {
+    try { a ? localStorage.setItem(AREA_KEY, JSON.stringify(a)) : localStorage.removeItem(AREA_KEY); } catch {}
+    setAreaState(a);
+    window.dispatchEvent(new Event("civicpulse:area"));
+  }, []);
+  return [area, setArea];
+}
+
 // ---- evidence trust / resolution / human review / audit ----
 export const evidenceTrust = (id) => api(`/issues/${id}/evidence-trust`, { auth: !!getAccess() });
 export const reanalyzeEvidence = (id) => api(`/issues/${id}/evidence/analyze`, { method: "POST" });

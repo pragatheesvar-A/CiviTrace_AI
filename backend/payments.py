@@ -63,9 +63,9 @@ def public_config() -> dict:
         "provider": "razorpay",
         "key_id": settings.razorpay_key_id if m == "test" else "",
         "currency": "INR",
-        "note": ("Razorpay sandbox (TEST keys)." if m == "test"
-                 else "Simulated payments — no Razorpay keys configured. "
-                      "Set CIVIC_RAZORPAY_KEY_ID / CIVIC_RAZORPAY_KEY_SECRET (TEST) for the real sandbox."),
+        "note": ("Razorpay sandbox — TEST payments only, no real money moves." if m == "test"
+                 else "Demo mode — payments are simulated (no Razorpay account connected). "
+                      "The full flow, verification and receipts still work."),
         "services": SERVICES,
     }
 

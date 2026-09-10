@@ -1,11 +1,17 @@
 // Converted from stitch mockup: home_dashboard/
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, useAuth, useLiveFeed } from "../api.jsx";
-import { Icon, Card, Spinner, PriorityBadge, StatusBadge, VerificationChip, fmtAgo } from "../ui.jsx";
+import { api, useAuth, useLiveFeed, useArea } from "../api.jsx";
+import {
+  Icon, Card, Spinner, PriorityBadge, StatusBadge, VerificationChip, AreaBar,
+  metresBetween, fmtAgo,
+} from "../ui.jsx";
+
+const AREA_RADIUS_M = 3000;
 
 export default function Home() {
   const { user } = useAuth();
+  const [area] = useArea();
   const [issues, setIssues] = useState(null);
   const [q, setQ] = useState("");
 
@@ -15,11 +21,14 @@ export default function Home() {
 
   if (!issues) return <Spinner />;
 
-  const open = issues.filter((i) => i.status !== "Resolved");
-  const resolved = issues.filter((i) => i.status === "Resolved");
+  const inArea = (i) => !area || metresBetween(area.lat, area.lng, i.lat, i.lng) <= AREA_RADIUS_M;
+  const scoped = issues.filter(inArea);
+  const open = scoped.filter((i) => !["Resolved", "Verified Closed"].includes(i.status));
+  const resolved = scoped.filter((i) => ["Resolved", "Verified Closed"].includes(i.status));
   const filtered = open.filter(
-    (i) => !q || i.title.toLowerCase().includes(q.toLowerCase()) || i.address.toLowerCase().includes(q.toLowerCase())
+    (i) => !q || i.title.toLowerCase().includes(q.toLowerCase()) || (i.address || "").toLowerCase().includes(q.toLowerCase())
   );
+  const areaName = area ? area.label.split(",")[0] : null;
 
   return (
     <div className="space-y-8">
@@ -28,9 +37,12 @@ export default function Home() {
           Hi, {user.name.split(" ")[0]} <span className="inline-block">👋</span>
         </h1>
         <p className="text-on-variant mt-2 font-medium opacity-75">
-          {open.length} open issues nearby · {user.points} civic points
+          {open.length} open {open.length === 1 ? "issue" : "issues"}
+          {areaName ? ` in ${areaName}` : " nearby"} · {user.points} civic points
         </p>
       </section>
+
+      <AreaBar />
 
       <div className="relative">
         <Icon name="search" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -59,10 +71,16 @@ export default function Home() {
 
       <section className="space-y-4">
         <div className="flex justify-between items-end">
-          <h2 className="text-2xl font-bold">Nearby Issues</h2>
-          <Link to="/map" className="text-primary font-bold text-sm">View all</Link>
+          <h2 className="text-2xl font-bold">{areaName ? `${areaName} Feed` : "Nearby Issues"}</h2>
+          <Link to="/map" className="text-primary font-bold text-sm">Map</Link>
         </div>
-        {filtered.length === 0 && <p className="text-on-variant text-sm">No matching issues.</p>}
+        {filtered.length === 0 && (
+          <p className="text-on-variant text-sm">
+            {area
+              ? `No open issues reported in ${areaName} yet. Spotted one? Tap Report Issue.`
+              : "No matching issues."}
+          </p>
+        )}
         {filtered.map((i) => (
           <Link key={i.id} to={`/issues/${i.id}`}>
             <Card className="space-y-3">

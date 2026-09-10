@@ -81,5 +81,5 @@ def totp_verify(secret: str, code: str, window: int = 1) -> bool:
 
 
 def totp_uri(secret: str, email: str) -> str:
-    return (f"otpauth://totp/CivicPulse:{email}?secret={secret}"
-            f"&issuer=CivicPulse&digits=6&period=30")
+    return (f"otpauth://totp/CiviTrace AI:{email}?secret={secret}"
+            f"&issuer=CiviTrace AI&digits=6&period=30")

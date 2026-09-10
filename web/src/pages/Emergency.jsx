@@ -30,7 +30,7 @@ export default function Emergency() {
         method: "POST",
         body: {
           title: `SOS — ${kind}`,
-          description: `Emergency alert raised from the CivicPulse app (${kind}). Immediate attention requested.`,
+          description: `Emergency alert raised from the CiviTrace AI app (${kind}). Immediate attention requested.`,
           category, lat, lng, address: "Live GPS location",
         },
       });

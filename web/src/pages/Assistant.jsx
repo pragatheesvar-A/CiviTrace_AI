@@ -33,7 +33,7 @@ export default function Assistant() {
   useEffect(() => {
     setMsgs([{
       who: "bot",
-      text: `Hi, I'm ${name} — your ${tagline}. I file and track reports, explain how the AI graded them, brief you on any area, and share safety guidance. Every answer comes straight from the CivicPulse database — I never guess.`,
+      text: `Hi, I'm ${name} — your ${tagline}. I file and track reports, explain how the AI graded them, brief you on any area, and share safety guidance. Every answer comes straight from the CiviTrace AI database — I never guess.`,
     }]);
   }, [name, tagline]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);

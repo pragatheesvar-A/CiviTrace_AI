@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CIVIC_", env_file=".env", extra="ignore")
 
     # --- core ---
-    app_name: str = "CivicPulse"
+    app_name: str = "CiviTrace AI"
     env: str = "dev"  # dev | prod
     db_url: str = f"sqlite+aiosqlite:///{os.path.join(BASE_DIR, 'civicpulse.db')}"
     upload_dir: str = os.path.join(ROOT_DIR, "uploads")

@@ -1,5 +1,5 @@
 """
-CivicPulse API — AI-driven civic intelligence backend.
+CiviTrace AI API — AI-driven civic intelligence backend.
 
 FastAPI + async SQLAlchemy (SQLite, swap DB_URL for Postgres).
 Real models: CLIP scene gate, YOLOv8 pothole detector, MiniLM text/embeddings,
@@ -380,7 +380,7 @@ async def lifespan(app: FastAPI):
     worker.cancel()
 
 
-app = FastAPI(title="CivicPulse API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="CiviTrace AI API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -529,8 +529,8 @@ def _send_otp_email(email: str, code: str) -> None:
         return
     import smtplib
     from email.mime.text import MIMEText
-    msg = MIMEText(f"Your CivicPulse verification code is {code}. It expires in 5 minutes.")
-    msg["Subject"] = "CivicPulse verification code"
+    msg = MIMEText(f"Your CiviTrace AI verification code is {code}. It expires in 5 minutes.")
+    msg["Subject"] = "CiviTrace AI verification code"
     msg["From"] = os.environ.get("CIVIC_SMTP_FROM", "no-reply@civicpulse.app")
     msg["To"] = email
     with smtplib.SMTP(host, int(os.environ.get("CIVIC_SMTP_PORT", "587"))) as sv:
@@ -1655,7 +1655,7 @@ async def payments_receipt(order_id: int, user: User = Depends(get_current_user)
         "currency": o.currency, "payer": user.name, "payer_email": user.email,
         "transaction_id": o.provider_payment_id, "order_id": o.provider_order_id,
         "paid_at": o.updated_at.isoformat(), "mode": o.mode,
-        "issuer": "CivicPulse Civic Services (prototype)",
+        "issuer": "CiviTrace AI Civic Services (prototype)",
         "note": "This is a prototype receipt. " + (
             "Razorpay TEST transaction — no real money moved."
             if o.mode == "test" else "Simulated payment — no Razorpay call was made."),

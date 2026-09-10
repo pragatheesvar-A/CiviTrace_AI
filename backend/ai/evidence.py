@@ -1,7 +1,7 @@
 """
 Evidence Trust Score + Multimodal Consistency  (heuristic prototype).
 
-This module fuses the signals CivicPulse can actually observe about a report
+This module fuses the signals CiviTrace AI can actually observe about a report
 into two citizen-facing outputs:
 
   * Evidence Trust Score (0-100) — how well the attached evidence supports the

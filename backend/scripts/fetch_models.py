@@ -25,7 +25,7 @@ def warn(m):
 
 
 def main():
-    print("Fetching CivicPulse AI models…")
+    print("Fetching CiviTrace AI models…")
     try:
         from transformers import CLIPModel, CLIPProcessor
 

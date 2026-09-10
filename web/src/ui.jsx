@@ -1,6 +1,6 @@
 // Converted from stitch mockup: offline_mode_state/ (OfflineBanner) + shared design-system primitives
 import React, { useEffect, useRef, useState } from "react";
-import { geocode } from "./api.jsx";
+import { geocode, reverseGeocode, useArea } from "./api.jsx";
 
 export const Icon = ({ name, className = "", fill = false, ...rest }) => (
   <span className={`material-symbols-outlined ${fill ? "fill" : ""} ${className}`} {...rest}>{name}</span>
@@ -405,6 +405,61 @@ export function GeoInput({ value, onChange, onPick, near, placeholder = "Search 
       )}
     </div>
   );
+}
+
+// "My area" selector — the community whose civic feed the citizen is viewing.
+export function AreaBar() {
+  const [area, setArea] = useArea();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function useGps() {
+    setBusy(true);
+    navigator.geolocation?.getCurrentPosition(async (p) => {
+      const lat = +p.coords.latitude.toFixed(6), lng = +p.coords.longitude.toFixed(6);
+      const label = (await reverseGeocode(lat, lng)) || "My location";
+      setArea({ label, lat, lng }); setBusy(false); setOpen(false);
+    }, () => setBusy(false), { timeout: 8000 });
+  }
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 bg-white card-line rounded-full px-4 py-2.5 active:scale-[0.99] transition-transform">
+        <Icon name="pin_drop" className="text-primary text-lg" fill />
+        <span className="flex-1 text-left text-sm font-semibold truncate">
+          {area ? area.label.split(",").slice(0, 2).join(", ") : "Choose your area"}
+        </span>
+        <Icon name={open ? "expand_less" : "expand_more"} className="text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute z-[900] left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl card-line p-3 space-y-2">
+          <GeoInput value={q} onChange={setQ}
+            onPick={(r) => { setArea({ label: r.label, lat: r.lat, lng: r.lng }); setOpen(false); setQ(""); }}
+            placeholder="Search your locality / community…"
+            className="w-full bg-surface-low border-none rounded-xl py-3 pl-11 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+          <button onClick={useGps} disabled={busy}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary/10 text-primary text-sm font-bold">
+            <Icon name="my_location" className="text-base" /> {busy ? "Locating…" : "Use my current location"}
+          </button>
+          {area && (
+            <button onClick={() => { setArea(null); setOpen(false); }}
+              className="w-full py-2 text-xs font-bold text-on-variant">Show all areas</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// distance in metres between two lat/lng points (haversine)
+export function metresBetween(aLat, aLng, bLat, bLng) {
+  const R = 6371000, toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
 }
 
 // Editorial oversized headline: "Report" + accent "An Issue."

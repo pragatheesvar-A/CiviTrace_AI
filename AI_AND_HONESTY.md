@@ -1,9 +1,9 @@
-# CivicPulse — AI Components & Honesty Statement
+# CiviTrace AI — AI Components & Honesty Statement
 
 This document states plainly what is a **trained model**, what is a **pretrained
 model used as-is**, and what is a **heuristic / rule prototype**. It exists so
 the IEEE research paper does not overclaim. No accuracy, precision, recall or F1
-number is reported here because **none has been measured on a labelled CivicPulse
+number is reported here because **none has been measured on a labelled CiviTrace AI
 dataset**. Where a number appears in the UI (a "trust score", a "confidence"),
 it is an **illustrative decision aid**, not a validated metric.
 

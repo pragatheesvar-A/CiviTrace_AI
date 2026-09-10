@@ -1,4 +1,4 @@
-# CivicPulse — AI-Assisted Civic Issue Reporting & Resolution
+# CiviTrace AI — AI-Assisted Civic Issue Reporting & Resolution
 
 Full-stack, end-to-end working build: **React 19 + Vite** frontend, **FastAPI + SQLAlchemy (async) + SQLite** backend, JWT auth with server-enforced roles, a two-stage AI verification pipeline, proximity deduplication, priority scoring, a community layer, an authority triage hub, and a WebSocket live feed.
 

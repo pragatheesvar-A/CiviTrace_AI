@@ -2,7 +2,7 @@
 // with a live "already reported / recently fixed here" check before submit.
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fileToBase64, reverseGeocode, issuesAround, useLiveFeed } from "../api.jsx";
+import { api, fileToBase64, reverseGeocode, issuesAround, useLiveFeed, getArea } from "../api.jsx";
 import {
   Icon, VerificationChip, ConfidenceMeter, PriorityBadge, SectionLabel,
   EditorialTitle, GeoInput, Stepper, NearbyList,
@@ -14,14 +14,20 @@ const VISION = { Roads: "2-stage CLIP → YOLO pothole pipeline", Flooding: "pho
 export default function Report() {
   const nav = useNavigate();
   const fileRef = useRef();
-  const [f, setF] = useState({ title: "", description: "", category: "Roads", lat: 13.0604, lng: 80.2496, address: "" });
+  const [f, setF] = useState(() => {
+    const a = getArea();
+    return {
+      title: "", description: "", category: "Roads",
+      lat: a?.lat ?? 13.0604, lng: a?.lng ?? 80.2496, address: a?.label || "",
+    };
+  });
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [result, setResult] = useState(null);
-  const [gps, setGps] = useState("");
-  const [locked, setLocked] = useState(false);   // user set a real location
+  const [gps, setGps] = useState(getArea() ? `Using your area: ${getArea().label.split(",")[0]}` : "");
+  const [locked, setLocked] = useState(!!getArea());   // area / GPS / picked place set
   const [near, setNear] = useState(null);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 

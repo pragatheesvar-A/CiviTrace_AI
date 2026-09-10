@@ -47,7 +47,7 @@ export default function Payments() {
       if (!ok) throw new Error("Could not load Razorpay Checkout");
       const rzp = new window.Razorpay({
         key: order.key_id, amount: order.amount, currency: order.currency,
-        name: "CivicPulse Civic Services", description: order.service_name,
+        name: "CiviTrace AI Civic Services", description: order.service_name,
         order_id: order.provider_order_id, prefill: { name: user.name, email: user.email },
         theme: { color: "#0d5c63" },
         handler: async (resp) => {

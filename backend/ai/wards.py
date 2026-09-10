@@ -1,7 +1,7 @@
 """
 Ward assignment + Fairness metrics  (decision-support prototype).
 
-CivicPulse does not ship official ward boundary polygons, so a report is mapped
+CiviTrace AI does not ship official ward boundary polygons, so a report is mapped
 to the nearest of a small set of named Chennai zone centroids. This is an
 approximation for the prototype — swap in a real GeoJSON ward layer for a
 deployment.

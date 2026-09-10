@@ -1,8 +1,8 @@
 // Converted from stitch mockup: live_map/
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
-import { api, useLiveFeed, issuesAround } from "../api.jsx";
+import { api, useLiveFeed, issuesAround, useArea } from "../api.jsx";
 import { Spinner, Icon, PriorityBadge, GeoInput, NearbyList } from "../ui.jsx";
 
 const CATS = ["All", "Roads", "Water", "Waste", "Electricity", "Safety", "Flooding", "Traffic"];
@@ -18,29 +18,51 @@ function MapController({ fly }) {
   return null;
 }
 
+const RADIUS_M = 3000;
+
 export default function MapView() {
+  const [area, setArea] = useArea();
   const [issues, setIssues] = useState(null);
   const [cat, setCat] = useState("All");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(area ? area.label.split(",")[0] : "");
   const [fly, setFly] = useState(null);
-  const [place, setPlace] = useState(null);   // { label, lat, lng, around }
+  const [place, setPlace] = useState(null);   // { label, lat, lng, around, loading }
+  const reqId = useRef(0);
   const nav = useNavigate();
 
-  async function goToPlace(r) {
+  const loadAround = useCallback(async (r, saveAsArea) => {
+    const mine = ++reqId.current;
     setFly({ lat: r.lat, lng: r.lng });
-    setPlace({ ...r, around: null });
-    const around = await issuesAround(r.lat, r.lng, { radius: 1200 });
-    setPlace((p) => (p && p.lat === r.lat ? { ...p, around } : p));
-  }
+    setPlace({ label: r.label, lat: r.lat, lng: r.lng, around: null, loading: true });
+    if (saveAsArea) setArea({ label: r.label, lat: r.lat, lng: r.lng });
+    const around = await issuesAround(r.lat, r.lng, { radius: RADIUS_M });
+    if (reqId.current === mine) setPlace({ label: r.label, lat: r.lat, lng: r.lng, around, loading: false });
+  }, [setArea]);
 
   const load = useCallback(() => api("/issues").then(setIssues).catch(() => setIssues([])), []);
   useEffect(() => { load(); }, [load]);
-  useLiveFeed(useCallback((ev) => { if (ev.type?.startsWith("issue")) load(); }, [load]));
+  useLiveFeed(useCallback((ev) => {
+    if (ev.type?.startsWith("issue")) {
+      load();
+      setPlace((p) => { if (p && !p.loading) loadAround(p); return p; });
+    }
+  }, [load, loadAround]));
 
-  const shown = useMemo(
-    () => (issues || []).filter((i) => cat === "All" || i.category === cat), [issues, cat]);
+  // if the citizen already chose an area, scope the map to it on open
+  useEffect(() => { if (area && !place) loadAround(area); /* eslint-disable-next-line */ }, [area]);
+
+  const shown = useMemo(() => {
+    let list = issues || [];
+    if (place && place.around) {
+      const ids = new Set([...(place.around.open || []), ...(place.around.resolved || [])].map((x) => x.id));
+      list = list.filter((i) => ids.has(i.id));
+    }
+    return list.filter((i) => cat === "All" || i.category === cat);
+  }, [issues, cat, place]);
   const center = useMemo(
-    () => (issues && issues.length ? [issues[0].lat, issues[0].lng] : [13.0604, 80.2496]), [issues]);
+    () => (area ? [area.lat, area.lng]
+      : issues && issues.length ? [issues[0].lat, issues[0].lng] : [13.0604, 80.2496]),
+    [area, issues]);
 
   if (!issues) return <Spinner />;
 
@@ -64,8 +86,9 @@ export default function MapView() {
       </MapContainer>
 
       <div className="absolute top-4 left-4 right-4 z-[600] space-y-2">
-        <GeoInput value={q} onChange={(v) => { setQ(v); if (!v) setPlace(null); }} onPick={goToPlace}
-          placeholder="Search any place to see issues there…"
+        <GeoInput value={q} onChange={(v) => { setQ(v); if (!v) { setPlace(null); setArea(null); } }}
+          onPick={(r) => loadAround(r, true)}
+          placeholder="Search your area / any place…"
           className="w-full glass-strong border-none rounded-full py-3 pl-12 pr-10 shadow-xl shadow-blue-900/10 focus:ring-2 focus:ring-primary/30 outline-none" />
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {CATS.map((c) => (
@@ -89,28 +112,28 @@ export default function MapView() {
             <div className="flex justify-between items-end mb-3">
               <div>
                 <p className="text-[10px] font-bold text-primary tracking-widest uppercase">
-                  {place ? "Around this place" : "Live feed"}
+                  {place ? "Community feed" : "Live feed"}
                 </p>
                 <h2 className="text-lg font-black font-headline truncate max-w-[220px]">
-                  {place ? (place.label?.split(",")[0] || "Searched area") : "Nearby Issues"}
+                  {place ? (place.label?.split(",")[0] || "Searched area") : "All issues"}
                 </h2>
               </div>
               {place
-                ? <button onClick={() => { setPlace(null); setQ(""); }} className="text-xs font-bold text-primary">Clear</button>
+                ? <button onClick={() => { setPlace(null); setQ(""); setArea(null); }} className="text-xs font-bold text-primary">Clear</button>
                 : <span className="text-xs font-semibold text-slate-400">{shown.length} shown</span>}
             </div>
 
             {place ? (
-              !place.around ? (
+              place.loading ? (
                 <p className="text-sm text-on-variant py-3 flex items-center gap-2">
                   <span className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                  Looking up issues near {place.label?.split(",")[0]}…
+                  Loading {place.label?.split(",")[0]} feed…
                 </p>
               ) : (
                 <NearbyList
-                  items={[...(place.around.open || []), ...(place.around.resolved || [])].slice(0, 12)}
+                  items={[...(place.around?.open || []), ...(place.around?.resolved || [])].slice(0, 15)}
                   onOpen={(i) => { setFly({ lat: i.lat, lng: i.lng }); nav(`/issues/${i.id}`); }}
-                  emptyText={`No civic issues reported within 1.2 km of ${place.label?.split(",")[0] || "here"}.`}
+                  emptyText={`No civic issues reported near ${place.label?.split(",")[0] || "here"} yet. Be the first — tap the ﹢ Report button.`}
                 />
               )
             ) : (
