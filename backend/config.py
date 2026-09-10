@@ -42,9 +42,11 @@ class Settings(BaseSettings):
     text_model: str = "all-MiniLM-L6-v2"
     pothole_weights: str = os.path.join(BASE_DIR, "ai", "weights", "pothole_yolov8.pt")
     yolo_fallback: str = os.path.join(BASE_DIR, "ai", "weights", "yolov8n.pt")
-    scene_gate_threshold: float = 0.45
-    detect_conf_threshold: float = 0.35
-    verify_conf_threshold: float = 0.55
+    scene_gate_threshold: float = 0.52
+    detect_conf_threshold: float = 0.40
+    verify_conf_threshold: float = 0.60
+    # a report is stamped "AI Verified" only with a vision match AND this authenticity
+    authenticity_verify_min: float = 0.55
     dedupe_radius_m: float = 75.0
     dedupe_text_sim: float = 0.55
 

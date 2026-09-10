@@ -2,8 +2,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { geocode } from "./api.jsx";
 
-export const Icon = ({ name, className = "", fill = false }) => (
-  <span className={`material-symbols-outlined ${fill ? "fill" : ""} ${className}`}>{name}</span>
+export const Icon = ({ name, className = "", fill = false, ...rest }) => (
+  <span className={`material-symbols-outlined ${fill ? "fill" : ""} ${className}`} {...rest}>{name}</span>
 );
 
 const PRIORITY = {
@@ -103,6 +103,110 @@ export function ConfidenceMeter({ issue }) {
           {label}{issue.detection_count > 0 ? ` · ${issue.detection_count} detection(s)` : ""}
         </p>
       </div>
+    </div>
+  );
+}
+
+// Report-authenticity ("is this real?") chip.
+export function AuthenticityChip({ issue }) {
+  const a = issue.authenticity || {};
+  const score = Math.round((issue.authenticity_score || 0) * 100);
+  if (!score && !a.label) return null;
+  const tone = score >= 70 ? { c: "#059669", b: "bg-secondary/10", i: "shield_person" }
+    : score >= 45 ? { c: "#0058bc", b: "bg-primary/10", i: "gpp_maybe" }
+      : { c: "#ea580c", b: "bg-orange-500/10", i: "gpp_bad" };
+  return (
+    <div className={`rounded-2xl p-3.5 ${tone.b}`}>
+      <div className="flex items-center gap-2">
+        <Icon name={tone.i} className="text-lg" style={{ color: tone.c }} fill />
+        <span className="text-sm font-bold" style={{ color: tone.c }}>
+          Authenticity {score}/100 · {a.label || "—"}
+        </span>
+      </div>
+      {Array.isArray(a.flags) && a.flags.length > 0 && (
+        <ul className="mt-1.5 ml-1 space-y-0.5">
+          {a.flags.map((f, n) => (
+            <li key={n} className="text-xs text-on-variant flex items-start gap-1">
+              <Icon name="chevron_right" className="text-xs mt-0.5" />{f}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function RecurrenceBanner({ issue }) {
+  if (!issue.recurrence) return null;
+  return (
+    <div className="rounded-2xl p-4 flex items-start gap-3"
+      style={{ background: "rgba(234,88,12,0.10)" }}>
+      <Icon name="history" className="text-orange-600 text-xl mt-0.5" fill />
+      <div>
+        <p className="font-bold text-orange-700 text-sm">Chronic location</p>
+        <p className="text-xs text-orange-800/80 mt-0.5">
+          This spot has been reported {issue.recurrence_count || 2}× and fixed before
+          {issue.recurrence_of ? ` (last: #${issue.recurrence_of})` : ""}. Priority was escalated automatically.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function EtaChip({ days }) {
+  if (days == null) return null;
+  const txt = days <= 1 ? "~1 day" : days < 14 ? `~${Math.round(days)} days` : `~${Math.round(days / 7)} weeks`;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-semibold text-on-variant">
+      <Icon name="schedule" className="text-sm" /> Est. fix {txt}
+    </span>
+  );
+}
+
+// Compact list of nearby issues with distance — reused on Map + Report.
+export function NearbyList({ items, onOpen, emptyText = "No issues reported here yet." }) {
+  if (!items || items.length === 0)
+    return <p className="text-sm text-on-variant py-2">{emptyText}</p>;
+  return (
+    <div className="space-y-2">
+      {items.map((i) => (
+        <button key={i.id} type="button" onClick={() => onOpen?.(i)}
+          className="w-full text-left bg-white/80 rounded-xl p-3 flex gap-3 items-center active:scale-[0.99] transition-transform">
+          {i.photo_url
+            ? <img src={i.photo_url} className="w-11 h-11 rounded-lg object-cover flex-shrink-0" alt="" />
+            : <div className="w-11 h-11 rounded-lg bg-surface-high grid place-items-center flex-shrink-0"><Icon name="place" className="text-slate-400" /></div>}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <PriorityBadge p={i.priority} />
+              {i.status === "Resolved" && <span className="text-[10px] font-bold text-secondary uppercase">fixed</span>}
+              {i.likely_duplicate && <span className="text-[10px] font-bold text-orange-600 uppercase">likely same</span>}
+            </div>
+            <p className="text-sm font-bold leading-tight truncate mt-0.5">{i.title}</p>
+            <p className="text-xs text-on-variant">{i.distance_m} m away · {i.category}</p>
+          </div>
+          <Icon name="chevron_right" className="text-slate-300" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Horizontal step indicator for a guided flow.
+export function Stepper({ steps, current }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {steps.map((s, n) => (
+        <React.Fragment key={s}>
+          <div className="flex flex-col items-center gap-1">
+            <div className={`w-6 h-6 rounded-full grid place-items-center text-[11px] font-bold transition-colors ${
+              n < current ? "bg-secondary text-white" : n === current ? "bg-primary text-white" : "bg-surface-high text-slate-400"}`}>
+              {n < current ? "✓" : n + 1}
+            </div>
+            <span className={`text-[9px] font-bold uppercase tracking-wide ${n === current ? "text-primary" : "text-slate-400"}`}>{s}</span>
+          </div>
+          {n < steps.length - 1 && <div className={`flex-1 h-0.5 rounded ${n < current ? "bg-secondary" : "bg-surface-high"}`} />}
+        </React.Fragment>
+      ))}
     </div>
   );
 }

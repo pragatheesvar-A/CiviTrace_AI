@@ -4,9 +4,15 @@ import { Link } from "react-router-dom";
 import { api, useAuth } from "../api.jsx";
 import { Icon, Spinner, StatusBadge, SectionLabel, fmtAgo } from "../ui.jsx";
 
+const PREF_KEY = "civicpulse_prefs";
+const loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } };
+
 export default function Profile() {
   const { user, logout } = useAuth();
   const [tab, setTab] = useState("mine");
+  const [panel, setPanel] = useState(null);   // which preference row is expanded
+  const [prefs, setPrefs] = useState(loadPrefs);
+  const setPref = (k, v) => setPrefs((p) => { const n = { ...p, [k]: v }; try { localStorage.setItem(PREF_KEY, JSON.stringify(n)); } catch {} return n; });
   const [mine, setMine] = useState(null);
   const [board, setBoard] = useState(null);
   const [wall, setWall] = useState(null);
@@ -113,14 +119,59 @@ export default function Profile() {
 
       <section className="space-y-4">
         <SectionLabel>Preferences</SectionLabel>
-        <div className="bg-white rounded-2xl p-2 shadow-sm">
-          {[["folder_open", "My reports"], ["notifications_active", "Notifications"], ["verified_user", "Account security"], ["help", "Help & support"]].map(([ic, lbl]) => (
-            <div key={lbl} className="w-full flex items-center justify-between p-3.5 rounded-xl">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-surface-low flex items-center justify-center text-primary"><Icon name={ic} className="text-lg" /></div>
-                <span className="font-semibold text-sm">{lbl}</span>
-              </div>
-              <Icon name="chevron_right" className="text-slate-300" />
+        <div className="bg-white rounded-2xl p-2 shadow-sm divide-y divide-surface-high/60">
+          {[
+            ["folder_open", "My reports", "mine"],
+            ["notifications_active", "Notifications", "notif"],
+            ["verified_user", "Account security", "security"],
+            ["help", "Help & support", "help"],
+          ].map(([ic, lbl, key]) => (
+            <div key={key}>
+              <button type="button"
+                onClick={() => {
+                  if (key === "mine") { setTab("mine"); window.scrollTo({ top: 0, behavior: "smooth" }); }
+                  else setPanel(panel === key ? null : key);
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-xl active:bg-surface-low">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-surface-low flex items-center justify-center text-primary"><Icon name={ic} className="text-lg" /></div>
+                  <span className="font-semibold text-sm">{lbl}</span>
+                </div>
+                <Icon name={key === "mine" ? "chevron_right" : panel === key ? "expand_less" : "expand_more"} className="text-slate-300" />
+              </button>
+
+              {panel === key && key === "notif" && (
+                <div className="px-3.5 pb-3.5 space-y-2">
+                  {[["status_updates", "Status updates on my reports"], ["nearby_alerts", "New critical issues near me"], ["resolved", "When an issue I follow is fixed"]].map(([k, t]) => (
+                    <label key={k} className="flex items-center justify-between text-sm py-1.5">
+                      <span className="text-on-variant">{t}</span>
+                      <button type="button" onClick={() => setPref(k, !(prefs[k] ?? true))}
+                        className={`w-11 h-6 rounded-full transition-colors relative ${(prefs[k] ?? true) ? "bg-primary" : "bg-surface-high"}`}>
+                        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${(prefs[k] ?? true) ? "left-[22px]" : "left-0.5"}`} />
+                      </button>
+                    </label>
+                  ))}
+                  <p className="text-[11px] text-slate-400">Saved on this device.</p>
+                </div>
+              )}
+              {panel === key && key === "security" && (
+                <div className="px-3.5 pb-3.5 space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-on-variant">Email</span><span className="font-semibold">{user.email}</span></div>
+                  <div className="flex justify-between"><span className="text-on-variant">Role</span><span className="font-semibold capitalize">{user.role}</span></div>
+                  <div className="flex justify-between"><span className="text-on-variant">Two-factor auth</span>
+                    <span className={`font-semibold ${user.totp_enabled ? "text-secondary" : "text-on-variant"}`}>{user.totp_enabled ? "Enabled" : user.role === "authority" ? "Recommended" : "Not required"}</span></div>
+                  <div className="flex justify-between"><span className="text-on-variant">Sessions</span><span className="font-semibold">Rotating refresh tokens</span></div>
+                  <button onClick={logout} className="mt-1 text-error font-bold text-xs">Sign out of this device</button>
+                </div>
+              )}
+              {panel === key && key === "help" && (
+                <div className="px-3.5 pb-3.5 space-y-2 text-sm text-on-variant">
+                  <p>• Use the <b>Assistant</b> tab — ask “how does verification work”.</p>
+                  <p>• Emergencies: use the SOS screen or call <b>112</b>.</p>
+                  <p>• Data & privacy: photos are EXIF-stripped and faces blurred before storage.</p>
+                  <a href="mailto:support@civicpulse.app" className="text-primary font-bold inline-block pt-1">Email support</a>
+                </div>
+              )}
             </div>
           ))}
         </div>

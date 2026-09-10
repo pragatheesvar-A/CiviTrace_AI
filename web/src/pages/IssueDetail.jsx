@@ -2,7 +2,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, useAuth, useLiveFeed, fileToBase64 } from "../api.jsx";
-import { Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, ConfidenceMeter, fmtAgo } from "../ui.jsx";
+import {
+  Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, ConfidenceMeter,
+  AuthenticityChip, RecurrenceBanner, EtaChip, fmtAgo,
+} from "../ui.jsx";
 
 const FLOW = ["Verifying", "Verified", "Assigned", "In Progress", "Resolved"];
 
@@ -80,16 +83,31 @@ export default function IssueDetail() {
               <span className="text-[11px] font-bold">{i.upvotes}</span>
             </button>
           </div>
-          <p className="text-on-variant text-sm flex items-center gap-1 mb-3">
+          <p className="text-on-variant text-sm flex items-center gap-1 mb-1">
             <Icon name="location_on" className="text-sm" />
             {i.address || `${i.lat}, ${i.lng}`} · by {i.reporter} · {fmtAgo(i.created_at)}
           </p>
-          {i.description && <p className="text-on-surface leading-relaxed">{i.description}</p>}
+          {i.status !== "Resolved" && <EtaChip days={i.eta_days} />}
+          {i.description && <p className="text-on-surface leading-relaxed mt-3">{i.description}</p>}
 
           <div className="mt-4 pt-4 border-t border-surface-high space-y-3">
+            <RecurrenceBanner issue={i} />
+            {i.dedupe_matched_id && (
+              <button onClick={() => nav(`/issues/${i.dedupe_matched_id}`)}
+                className="text-xs font-bold text-primary flex items-center gap-1">
+                <Icon name="merge" className="text-sm" /> Clustered with report #{i.dedupe_matched_id}
+              </button>
+            )}
             <ConfidenceMeter issue={i} />
+            <AuthenticityChip issue={i} />
             <VerificationChip issue={i} />
             <p className="text-sm text-on-variant border-l-2 border-primary/30 pl-3">{i.verification_note}</p>
+            {i.status === "Resolved" && i.resolution_note && (
+              <p className={`text-sm border-l-2 pl-3 ${i.resolution_verified ? "text-secondary border-secondary/40" : "text-orange-600 border-orange-400/40"}`}>
+                <Icon name={i.resolution_verified ? "verified" : "gpp_maybe"} className="text-sm mr-1" fill />
+                {i.resolution_note}
+              </p>
+            )}
             {i.cluster_count > 1 && (
               <p className="text-sm font-semibold flex items-center gap-1">
                 <Icon name="group_work" className="text-base text-primary" />

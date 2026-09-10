@@ -14,7 +14,7 @@ export default function Authority() {
     api("/authority/kpis").then(setKpis).catch(() => {});
     api("/authority/queue").then(setQueue).catch(() => {});
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => { load(); }, [load]);
   useLiveFeed(useCallback(() => load(), [load]));
 
   useEffect(() => {

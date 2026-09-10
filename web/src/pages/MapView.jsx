@@ -2,8 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
-import { api, useLiveFeed } from "../api.jsx";
-import { Spinner, Icon, PriorityBadge, GeoInput } from "../ui.jsx";
+import { api, useLiveFeed, issuesAround } from "../api.jsx";
+import { Spinner, Icon, PriorityBadge, GeoInput, NearbyList } from "../ui.jsx";
 
 const CATS = ["All", "Roads", "Water", "Waste", "Electricity", "Safety", "Flooding", "Traffic"];
 const COLOR = { critical: "#ba1a1a", high: "#ea580c", medium: "#0058bc", low: "#94a3b8" };
@@ -23,7 +23,15 @@ export default function MapView() {
   const [cat, setCat] = useState("All");
   const [q, setQ] = useState("");
   const [fly, setFly] = useState(null);
+  const [place, setPlace] = useState(null);   // { label, lat, lng, around }
   const nav = useNavigate();
+
+  async function goToPlace(r) {
+    setFly({ lat: r.lat, lng: r.lng });
+    setPlace({ ...r, around: null });
+    const around = await issuesAround(r.lat, r.lng, { radius: 1200 });
+    setPlace((p) => (p && p.lat === r.lat ? { ...p, around } : p));
+  }
 
   const load = useCallback(() => api("/issues").then(setIssues).catch(() => setIssues([])), []);
   useEffect(() => { load(); }, [load]);
@@ -56,8 +64,8 @@ export default function MapView() {
       </MapContainer>
 
       <div className="absolute top-4 left-4 right-4 z-[600] space-y-2">
-        <GeoInput value={q} onChange={setQ} onPick={(r) => setFly({ lat: r.lat, lng: r.lng })}
-          placeholder="Search any place…"
+        <GeoInput value={q} onChange={(v) => { setQ(v); if (!v) setPlace(null); }} onPick={goToPlace}
+          placeholder="Search any place to see issues there…"
           className="w-full glass-strong border-none rounded-full py-3 pl-12 pr-10 shadow-xl shadow-blue-900/10 focus:ring-2 focus:ring-primary/30 outline-none" />
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {CATS.map((c) => (
@@ -80,11 +88,32 @@ export default function MapView() {
           <div className="px-4">
             <div className="flex justify-between items-end mb-3">
               <div>
-                <p className="text-[10px] font-bold text-primary tracking-widest uppercase">Live feed</p>
-                <h2 className="text-lg font-black font-headline">Nearby Issues</h2>
+                <p className="text-[10px] font-bold text-primary tracking-widest uppercase">
+                  {place ? "Around this place" : "Live feed"}
+                </p>
+                <h2 className="text-lg font-black font-headline truncate max-w-[220px]">
+                  {place ? (place.label?.split(",")[0] || "Searched area") : "Nearby Issues"}
+                </h2>
               </div>
-              <span className="text-xs font-semibold text-slate-400">{shown.length} shown</span>
+              {place
+                ? <button onClick={() => { setPlace(null); setQ(""); }} className="text-xs font-bold text-primary">Clear</button>
+                : <span className="text-xs font-semibold text-slate-400">{shown.length} shown</span>}
             </div>
+
+            {place ? (
+              !place.around ? (
+                <p className="text-sm text-on-variant py-3 flex items-center gap-2">
+                  <span className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  Looking up issues near {place.label?.split(",")[0]}…
+                </p>
+              ) : (
+                <NearbyList
+                  items={[...(place.around.open || []), ...(place.around.resolved || [])].slice(0, 12)}
+                  onOpen={(i) => { setFly({ lat: i.lat, lng: i.lng }); nav(`/issues/${i.id}`); }}
+                  emptyText={`No civic issues reported within 1.2 km of ${place.label?.split(",")[0] || "here"}.`}
+                />
+              )
+            ) : (
             <div className="space-y-2">
               {shown.map((i) => (
                 <button key={i.id} onClick={() => { setFly({ lat: i.lat, lng: i.lng }); nav(`/issues/${i.id}`); }}
@@ -101,6 +130,7 @@ export default function MapView() {
                 </button>
               ))}
             </div>
+            )}
           </div>
         </div>
       </div>

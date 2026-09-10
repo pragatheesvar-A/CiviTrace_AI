@@ -8,6 +8,19 @@ from sqlalchemy import func, select
 import auth as A
 from models import Issue, RefreshToken, User, utcnow
 
+try:
+    from ai.text_classifier import embed as _embed
+except Exception:  # pragma: no cover
+    _embed = lambda _t: None
+
+
+def _emb(text: str):
+    try:
+        v = _embed(text)
+        return [round(float(x), 5) for x in v] if v is not None else None
+    except Exception:
+        return None
+
 SEED_ISSUES = [
     ("Deep pothole cluster on Anna Salai",
      "Multiple potholes near the bus stop, two-wheelers swerving into traffic.",
@@ -65,13 +78,25 @@ async def seed(Session):
                 note = f"Vision scene classifier {conf:.0%}"
             else:
                 note = f"Text classifier (embedding) -> {cat} @ {conf:.0%} (weaker than vision)"
+            # honest demo state: only vision matches carry the "AI Verified" badge
+            vis = ver and method == "vision"
+            ver = vis
+            auth_score = round(min(0.97, 0.4 + 0.5 * conf + (0.1 if det else 0.0)), 2) if vis else 0.4
+            eta = {"critical": 1.5, "high": 3.0, "medium": 7.0, "low": 14.0}[prio]
             i = Issue(
                 title=title, description=desc, category=cat, lat=lat, lng=lng, address=addr,
                 priority=prio, priority_score={"critical": .95, "high": .72, "medium": .45, "low": .2}[prio],
                 verified=ver, verification_method=method, verification_confidence=conf,
                 detection_count=det, severity=sev, verification_note=note,
                 evidence=[{"stage": "seed", "note": "demo data"}],
-                model_version="clip-vitb32/yolov8m-pothole/minilm-l6-v2 @ pipeline-v2",
+                model_version="clip-vitb32/yolov8m-pothole/minilm-l6-v2/open-meteo @ pipeline-v3",
+                authenticity_score=auth_score,
+                authenticity={"score": auth_score,
+                              "label": "authentic" if auth_score >= 0.7 else "plausible" if auth_score >= 0.45 else "needs review",
+                              "flags": [] if ver else ["no photo attached — text-only report"],
+                              "checks": {"reporter_trust": 0.7, "scene_pass": 1.0 if method == "vision" else 0.5}},
+                eta_days=eta,
+                embedding=_emb(f"{title}. {desc}"),
                 status="Verified" if ver else "Reported", reporter_id=rep.id,
                 upvotes=(n * 3) % 11, ward_weight=0.5,
                 created_at=utcnow() - timedelta(hours=6 * n + 2),
@@ -85,6 +110,9 @@ async def seed(Session):
             i = Issue(title=title, description="Resolved by municipal crew.", category=cat,
                       lat=lat, lng=lng, address=addr, priority="medium", priority_score=0.45,
                       verified=True, verification_method="text", verification_confidence=0.6,
+                      embedding=_emb(f"{title}. Resolved by municipal crew."),
+                      resolution_verified=True,
+                      resolution_note="Proof photo: scene 88% · distinct from the original — accepted.",
                       status="Resolved", reporter_id=priya.id, upvotes=5, ward_weight=0.5,
                       created_at=utcnow() - timedelta(days=4), resolved_at=utcnow() - timedelta(days=1))
             s.add(i)

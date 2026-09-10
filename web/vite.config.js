@@ -13,5 +13,5 @@ export default defineConfig({
       "/ws": { target: API, ws: true, changeOrigin: true },
     },
   },
-  build: { outDir: "../frontend", emptyOutDir: true },
+  build: { outDir: "../frontend", emptyOutDir: true},
 });

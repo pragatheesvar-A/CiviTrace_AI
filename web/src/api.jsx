@@ -47,6 +47,15 @@ export async function api(path, { method = "GET", body, auth = true, retry = tru
   return data;
 }
 
+// ---- issues near a point (duplicate / recurrence warning + "issues near <place>") ----
+export async function issuesAround(lat, lng, { radius = 350, category, text } = {}) {
+  const p = new URLSearchParams({ lat, lng, radius });
+  if (category) p.set("category", category);
+  if (text) p.set("text", text);
+  try { return await api(`/issues/around?${p}`, { auth: !!getAccess() }); }
+  catch { return { open: [], resolved: [], count: 0, duplicate_candidates: [], recurrence_candidates: [] }; }
+}
+
 // ---- public app config (map provider, assistant name) ----
 export function useConfig() {
   const [cfg, setCfg] = useState(null);

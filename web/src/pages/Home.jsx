@@ -10,7 +10,7 @@ export default function Home() {
   const [q, setQ] = useState("");
 
   const load = useCallback(() => api("/issues").then(setIssues).catch(() => setIssues([])), []);
-  useEffect(load, [load]);
+  useEffect(() => { load(); }, [load]);
   useLiveFeed(useCallback(() => load(), [load]));
 
   if (!issues) return <Spinner />;

@@ -1,10 +1,15 @@
-// Converted from stitch mockup: report_issue/
-import React, { useRef, useState } from "react";
+// Guided civic report flow — photo → details → location → review,
+// with a live "already reported / recently fixed here" check before submit.
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fileToBase64, reverseGeocode } from "../api.jsx";
-import { Icon, VerificationChip, PriorityBadge, SectionLabel, EditorialTitle, GeoInput } from "../ui.jsx";
+import { api, fileToBase64, reverseGeocode, issuesAround } from "../api.jsx";
+import {
+  Icon, VerificationChip, ConfidenceMeter, PriorityBadge, SectionLabel,
+  EditorialTitle, GeoInput, Stepper, NearbyList,
+} from "../ui.jsx";
 
 const CATS = ["Roads", "Water", "Waste", "Electricity", "Safety", "Flooding", "Traffic"];
+const VISION = { Roads: "2-stage CLIP → YOLO pothole pipeline", Flooding: "photo + live rainfall at this GPS point", Traffic: "CLIP signal / junction classifier" };
 
 export default function Report() {
   const nav = useNavigate();
@@ -16,7 +21,21 @@ export default function Report() {
   const [err, setErr] = useState("");
   const [result, setResult] = useState(null);
   const [gps, setGps] = useState("");
+  const [locked, setLocked] = useState(false);   // user set a real location
+  const [near, setNear] = useState(null);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+
+  const step = !preview ? 0 : !f.title.trim() ? 1 : !locked ? 2 : 3;
+
+  // live duplicate / recurrence check once we know category + a real location
+  useEffect(() => {
+    if (!locked) { setNear(null); return; }
+    const t = setTimeout(async () => {
+      const r = await issuesAround(f.lat, f.lng, { radius: 300, category: f.category, text: `${f.title} ${f.description}` });
+      setNear(r);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [locked, f.lat, f.lng, f.category, f.title, f.description]);
 
   function locate() {
     setGps("locating…");
@@ -24,18 +43,23 @@ export default function Report() {
       const lat = +p.coords.latitude.toFixed(6), lng = +p.coords.longitude.toFixed(6);
       const addr = await reverseGeocode(lat, lng);
       setF((s) => ({ ...s, lat, lng, address: addr || s.address }));
-      setGps("GPS location tagged");
-    }, () => setGps("permission denied — pick a place below"), { timeout: 8000, enableHighAccuracy: true });
+      setGps("GPS location tagged"); setLocked(true);
+    }, () => setGps("permission denied — search a place below"), { timeout: 8000, enableHighAccuracy: true });
   }
 
   async function pickPhoto(e) {
     const file = e.target.files?.[0];
-    e.target.value = "";           // allow re-selecting the same file
+    e.target.value = "";
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) { setErr("Image must be under 10 MB"); return; }
     setErr("");
     setPhoto(await fileToBase64(file));
     setPreview((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(file); });
+  }
+
+  async function upvoteInstead(id) {
+    try { await api(`/issues/${id}/vote?kind=up`, { method: "POST" }); } catch {}
+    nav(`/issues/${id}`);
   }
 
   async function submit(e) {
@@ -63,21 +87,22 @@ export default function Report() {
           <div className="flex gap-2 items-center flex-wrap">
             <PriorityBadge p={result.priority} />
             <span className="text-xs font-bold text-on-variant">
-              {result.cluster_count > 1 ? `Merged into cluster of ${result.cluster_count}` : "New cluster"}
+              {result.cluster_count > 1 ? `Merged into a cluster of ${result.cluster_count}` : "New cluster"}
             </span>
           </div>
+          <ConfidenceMeter issue={result} />
           <VerificationChip issue={result} />
           <p className="text-sm text-on-variant border-l-2 border-primary/30 pl-3">{result.verification_note}</p>
           {result.verification_method === "pending" && (
             <p className="text-xs text-primary flex items-center gap-1">
               <span className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-              AI is verifying your photo — the result will appear on the issue page shortly.
+              AI is verifying the photo, checking for duplicates and past reports here — results appear on the issue page shortly.
             </p>
           )}
         </div>
         <div className="flex gap-3">
           <button onClick={() => nav(`/issues/${result.id}`)} className="flex-1 py-3.5 rounded-full bg-primary text-white font-bold">View issue</button>
-          <button onClick={() => { setResult(null); setF((s) => ({ ...s, title: "", description: "" })); setPhoto(null); setPreview(null); }}
+          <button onClick={() => { setResult(null); setF((s) => ({ ...s, title: "", description: "" })); setPhoto(null); setPreview(null); setLocked(false); setNear(null); }}
             className="flex-1 py-3.5 rounded-full bg-white font-bold shadow-sm">Report another</button>
         </div>
       </div>
@@ -85,7 +110,8 @@ export default function Report() {
 
   return (
     <form onSubmit={submit} className="space-y-7">
-      <EditorialTitle top="Report" accent="An Issue." sub="Help keep your neighbourhood safe and pristine." />
+      <EditorialTitle top="Report" accent="An Issue." sub="Four quick steps. We check it isn't already reported before you submit." />
+      <Stepper steps={["Photo", "Details", "Place", "Review"]} current={step} />
 
       <section className="relative">
         <button type="button" onClick={() => fileRef.current?.click()}
@@ -95,7 +121,8 @@ export default function Report() {
             : (
               <span className="flex flex-col items-center gap-3 text-primary">
                 <span className="p-5 rounded-full bg-primary/10"><Icon name="add_a_photo" className="text-4xl" fill /></span>
-                <span className="font-semibold tracking-widest uppercase text-xs">Upload evidence</span>
+                <span className="font-semibold tracking-widest uppercase text-xs">Add a photo of the problem</span>
+                <span className="text-[11px] text-on-variant normal-case tracking-normal">A clear photo lets the AI verify it automatically</span>
               </span>
             )}
         </button>
@@ -106,14 +133,10 @@ export default function Report() {
             <Icon name="delete" className="text-lg" />
           </button>
         )}
-        <button type="button" onClick={locate}
-          className="absolute -bottom-5 right-5 w-14 h-14 rounded-full glass-strong shadow-xl shadow-primary/15 flex items-center justify-center text-primary active:scale-90 transition-transform">
-          <Icon name="my_location" className="text-2xl" fill />
-        </button>
       </section>
 
       <section>
-        <SectionLabel>Select category</SectionLabel>
+        <SectionLabel>What kind of problem?</SectionLabel>
         <div className="flex flex-wrap gap-2.5">
           {CATS.map((c) => (
             <button type="button" key={c} onClick={() => setF((s) => ({ ...s, category: c }))}
@@ -122,6 +145,11 @@ export default function Report() {
             </button>
           ))}
         </div>
+        {VISION[f.category] && (
+          <p className="text-xs text-primary mt-2 flex items-center gap-1">
+            <Icon name="auto_awesome" className="text-sm" /> Photo is auto-verified — {VISION[f.category]}
+          </p>
+        )}
       </section>
 
       <section>
@@ -138,26 +166,64 @@ export default function Report() {
 
       <section>
         <div className="flex justify-between items-end mb-3">
-          <SectionLabel>Location</SectionLabel>
+          <SectionLabel>Where is it?</SectionLabel>
           <button type="button" onClick={locate}
             className="flex items-center gap-1.5 text-primary font-bold text-xs bg-primary/10 px-3 py-1.5 rounded-full">
             <Icon name="my_location" className="text-sm" /> Use GPS
           </button>
         </div>
-        <GeoInput value={f.address} onChange={(v) => setF((s) => ({ ...s, address: v }))}
-          onPick={(r) => setF((s) => ({ ...s, address: r.label, lat: +r.lat.toFixed(6), lng: +r.lng.toFixed(6) }))}
+        <GeoInput value={f.address}
+          onChange={(v) => setF((s) => ({ ...s, address: v }))}
+          onPick={(r) => { setF((s) => ({ ...s, address: r.label, lat: +r.lat.toFixed(6), lng: +r.lng.toFixed(6) })); setLocked(true); setGps("location set"); }}
           near={{ lat: f.lat, lng: f.lng }} placeholder="Search street / landmark…" />
         <p className="text-xs text-on-variant mt-2">
           {gps || `Pin: ${(+f.lat).toFixed(4)}, ${(+f.lng).toFixed(4)}`}
-          {f.category === "Roads" && " · a road photo runs the 2-stage CLIP→YOLO vision pipeline"}
-          {f.category === "Flooding" && " · verified from the photo + live rainfall at this GPS point"}
-          {f.category === "Traffic" && " · a junction/signal photo runs the CLIP scene classifier"}
         </p>
       </section>
 
+      {locked && near && (near.duplicate_candidates?.length > 0 || near.recurrence_candidates?.length > 0 || near.open?.length > 0) && (
+        <section className="bg-white rounded-2xl p-4 shadow-sm space-y-3 fadeup">
+          {near.duplicate_candidates?.length > 0 ? (
+            <>
+              <p className="text-sm font-bold flex items-center gap-1.5 text-orange-600">
+                <Icon name="content_copy" className="text-base" /> This may already be reported
+              </p>
+              <NearbyList items={near.duplicate_candidates} onOpen={(i) => nav(`/issues/${i.id}`)} />
+              <p className="text-xs text-on-variant">If it's the same problem, add your voice instead of a duplicate:</p>
+              <div className="flex flex-wrap gap-2">
+                {near.duplicate_candidates.map((i) => (
+                  <button key={i.id} type="button" onClick={() => upvoteInstead(i.id)}
+                    className="px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                    ▲ Upvote #{i.id} instead
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-bold flex items-center gap-1.5">
+                <Icon name="near_me" className="text-base text-primary" /> {near.count} issue(s) near this spot
+              </p>
+              <NearbyList items={near.open?.slice(0, 3)} onOpen={(i) => nav(`/issues/${i.id}`)} />
+            </>
+          )}
+          {near.recurrence_candidates?.length > 0 && (
+            <div className="rounded-xl p-3 mt-1" style={{ background: "rgba(234,88,12,0.10)" }}>
+              <p className="text-xs font-bold text-orange-700 flex items-center gap-1">
+                <Icon name="history" className="text-sm" /> Fixed here before
+              </p>
+              <p className="text-xs text-orange-800/80 mt-0.5">
+                A similar issue was marked resolved nearby. If the problem is back, mention that in the description —
+                we'll flag it as a recurring / chronic spot and escalate it.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
       {err && <p className="text-error text-sm font-medium">{err}</p>}
-      <button type="submit" disabled={busy}
-        className="w-full py-5 rounded-full bg-gradient-to-br from-primary to-primary-container text-white font-headline text-lg font-bold shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-60">
+      <button type="submit" disabled={busy || !f.title.trim()}
+        className="w-full py-5 rounded-full bg-gradient-to-br from-primary to-primary-container text-white font-headline text-lg font-bold shadow-xl shadow-primary/30 active:scale-95 transition-all disabled:opacity-50">
         {busy ? "Submitting…" : "Submit issue"}
       </button>
     </form>

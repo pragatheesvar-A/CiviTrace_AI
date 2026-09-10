@@ -126,14 +126,25 @@ def run(category: str, title: str, description: str, photo_path: Optional[str],
         return v
 
     # ---- text path ----
-    verified = tc.confidence >= 0.62
+    # Text is a *lead*, never a confirmation. A report is only auto-"verified" from
+    # a photo (vision) or, downstream, from independent corroboration (a cluster of
+    # 3+ citizen reports — handled by the priority/cluster logic). This keeps the
+    # "AI Verified" badge meaningful and prevents a plausible-sounding description
+    # with no evidence from being stamped as confirmed.
+    had_photo = bool(photo_path)
+    note = (f"Text classifier ({tc.method}) → {tc.category} @ {tc.confidence:.0%}. "
+            "Treated as an unverified lead — needs a photo or corroborating reports "
+            "to be confirmed.")
+    if had_photo:
+        note = (f"Photo did not pass the '{category}' vision check; "
+                f"text classifier → {tc.category} @ {tc.confidence:.0%}. "
+                "Not marked verified.")
     v = Verdict(
-        verified=verified, method="text", confidence=tc.confidence,
+        verified=False, method="text", confidence=round(tc.confidence, 3),
         detections=0, severity=0.0, severity_label="minor",
         category_suggestion=tc.category,
         evidence=[{"stage": "text_classifier", **tc.dict()}],
-        note=(f"Text classifier ({tc.method}) → {tc.category} @ {tc.confidence:.0%}. "
-              f"No vision model for '{category}' yet — weaker signal than a verified photo."),
+        note=note,
     )
     v.elapsed_ms = int((time.time() - t0) * 1000)
     return v

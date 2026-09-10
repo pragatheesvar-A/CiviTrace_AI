@@ -72,8 +72,24 @@ class Issue(Base):
 
     cluster_id: Mapped[int] = mapped_column(Integer, index=True, default=0)
     dedupe_distance: Mapped[float] = mapped_column(Float, default=0.0)
+    dedupe_matched_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     embedding: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     upvotes: Mapped[int] = mapped_column(Integer, default=0)
+
+    # authenticity / anti-abuse
+    photo_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    authenticity_score: Mapped[float] = mapped_column(Float, default=0.0)
+    authenticity: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # chronic-location / recurrence intelligence
+    recurrence: Mapped[bool] = mapped_column(Boolean, default=False)
+    recurrence_of: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    recurrence_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # resolution-proof verification (after-photo check)
+    resolution_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    resolution_note: Mapped[str] = mapped_column(String(400), default="")
+    eta_days: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -27,8 +27,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import auth as A
-from ai import registry, verify as ai_verify, dedup as ai_dedup, priority as ai_priority, trust as ai_trust
-from ai.assistant import assistant, ASSISTANT_NAME
+from ai import (registry, verify as ai_verify, dedup as ai_dedup, priority as ai_priority,
+                trust as ai_trust, authenticity as ai_auth, weather as ai_weather)
+from ai.assistant import assistant, ASSISTANT_NAME, ASSISTANT_TAGLINE
 from ai.text_classifier import embed as text_embed
 from config import settings
 from models import AuditLog, Base, Comment, Issue, OtpCode, RefreshToken, User, Vote, utcnow
@@ -165,6 +166,13 @@ async def issue_public(session: AsyncSession, i: Issue, viewer: Optional[User]) 
         "priority_explanation": i.priority_explanation or {},
         "model_version": i.model_version,
         "cluster_id": i.cluster_id, "cluster_count": cc, "dedupe_distance": i.dedupe_distance,
+        "dedupe_matched_id": i.dedupe_matched_id,
+        "photo_hash": i.photo_hash,
+        "authenticity_score": i.authenticity_score, "authenticity": i.authenticity or {},
+        "recurrence": i.recurrence, "recurrence_of": i.recurrence_of,
+        "recurrence_count": i.recurrence_count,
+        "resolution_verified": i.resolution_verified, "resolution_note": i.resolution_note,
+        "eta_days": i.eta_days,
         "upvotes": i.upvotes, "reporter": reporter.name if reporter else "—",
         "reporter_id": i.reporter_id,
         "reporter_trust": rtrust, "reporter_trust_band": ai_trust.trust_band(rtrust),
@@ -303,6 +311,7 @@ async def health():
 async def public_config():
     return {
         "assistant_name": ASSISTANT_NAME,
+        "assistant_tagline": ASSISTANT_TAGLINE,
         "map_provider": "google" if os.environ.get("CIVIC_GMAPS_KEY") else "maplibre",
         "gmaps_key_present": bool(os.environ.get("CIVIC_GMAPS_KEY")),
         "categories": list(settings.categories),
@@ -526,6 +535,59 @@ async def list_issues(category: Optional[str] = None, status_f: Optional[str] = 
     return [await issue_public(session, i, viewer) for i in issues]
 
 
+@app.get("/api/issues/around")
+async def issues_around(lat: float, lng: float, radius: float = 350.0,
+                        category: Optional[str] = None, text: str = "",
+                        session: AsyncSession = Depends(get_session),
+                        authorization: Optional[str] = Header(default=None)):
+    """Everything near a point — used to (a) show 'issues near <place>' when a
+    citizen searches a location and (b) warn 'this may already be reported /
+    was recently fixed here' before they submit a duplicate."""
+    viewer = await maybe_user(session, authorization)
+    radius = max(50.0, min(radius, 3000.0))
+    rows = (await session.execute(select(Issue))).scalars().all()
+
+    qvec = None
+    if text.strip():
+        v = await asyncio.to_thread(text_embed, text.strip())
+        qvec = [float(x) for x in v] if v is not None else None
+
+    def sim(o: Issue) -> float:
+        if qvec is None or not o.embedding:
+            return 0.0
+        import math
+        ov = [float(x) for x in o.embedding]
+        dot = sum(a * b for a, b in zip(qvec, ov))
+        na = math.sqrt(sum(a * a for a in qvec)) or 1.0
+        nb = math.sqrt(sum(b * b for b in ov)) or 1.0
+        return float(max(0.0, dot / (na * nb)))
+
+    open_hits, resolved_hits = [], []
+    for o in rows:
+        d = ai_dedup.haversine_m(lat, lng, o.lat, o.lng)
+        if d > radius:
+            continue
+        pub = await issue_public(session, o, viewer)
+        pub["distance_m"] = int(d)
+        pub["similarity"] = round(float(sim(o)), 3)
+        same_cat = (category is None or o.category == category)
+        text_ok = (qvec is None or not o.embedding or pub["similarity"] >= 0.5)
+        pub["likely_duplicate"] = bool(same_cat and o.status != "Resolved" and d <= 90 and text_ok)
+        (resolved_hits if o.status == "Resolved" else open_hits).append(pub)
+
+    open_hits.sort(key=lambda x: (not x["likely_duplicate"], x["distance_m"]))
+    resolved_hits.sort(key=lambda x: x["distance_m"])
+    recurrence = [r for r in resolved_hits
+                  if (category is None or r["category"] == category) and r["distance_m"] <= radius]
+    return {
+        "center": {"lat": lat, "lng": lng}, "radius_m": radius,
+        "count": len(open_hits) + len(resolved_hits),
+        "open": open_hits[:8], "resolved": resolved_hits[:5],
+        "duplicate_candidates": [x for x in open_hits if x["likely_duplicate"]][:3],
+        "recurrence_candidates": recurrence[:3],
+    }
+
+
 @app.get("/api/issues/{issue_id}")
 async def get_issue(issue_id: int, session: AsyncSession = Depends(get_session),
                     authorization: Optional[str] = Header(default=None)):
@@ -550,15 +612,84 @@ async def _recompute_priority(session: AsyncSession, issue: Issue) -> None:
     issue.priority, issue.priority_score, issue.priority_explanation = pr.level, pr.score, pr.dict()
 
 
+# static fallback SLA (days) by priority — refined with real history when available
+_ETA_BASE = {"critical": 1.5, "high": 3.0, "medium": 7.0, "low": 14.0}
+
+
+async def _eta_days(session: AsyncSession, category: str, priority: str) -> float:
+    rows = (await session.execute(select(Issue).where(
+        Issue.category == category, Issue.status == "Resolved",
+        Issue.resolved_at.is_not(None)))).scalars().all()
+    spans = [(aware(i.resolved_at) - aware(i.created_at)).total_seconds() / 86400
+             for i in rows if i.resolved_at]
+    base = _ETA_BASE.get(priority, 7.0)
+    if len(spans) >= 3:
+        hist = sorted(spans)[len(spans) // 2]  # median
+        return round(0.5 * base + 0.5 * hist, 1)
+    return base
+
+
+async def _detect_recurrence(session: AsyncSession, issue: Issue) -> None:
+    """Flag a report whose location + category matches a previously *resolved*
+    issue — a chronic spot the city keeps having to fix."""
+    radius = settings.dedupe_radius_m * 1.6
+    resolved = (await session.execute(select(Issue).where(
+        Issue.category == issue.category, Issue.status == "Resolved",
+        Issue.id != issue.id))).scalars().all()
+    hits = [r for r in resolved
+            if ai_dedup.haversine_m(issue.lat, issue.lng, r.lat, r.lng) <= radius]
+    if not hits:
+        return
+    hits.sort(key=lambda r: aware(r.resolved_at) or aware(r.created_at), reverse=True)
+    prior = hits[0]
+    issue.recurrence = True
+    issue.recurrence_of = prior.id
+    issue.recurrence_count = len(hits) + 1
+    days = (utcnow() - (aware(prior.resolved_at) or utcnow())).days
+    issue.verification_note = (
+        (issue.verification_note + " ") if issue.verification_note else "") + (
+        f"⚠ Recurrence — this location was fixed {days}d ago (#{prior.id}); "
+        f"{issue.recurrence_count} times on record. Chronic spot — escalated.")
+
+
+async def _assess_authenticity(session: AsyncSession, issue: Issue,
+                               photo_path: Optional[str], verdict) -> None:
+    novel = True
+    if photo_path:
+        h = await asyncio.to_thread(ai_auth.dhash, photo_path)
+        issue.photo_hash = h
+        if h:
+            others = (await session.execute(select(Issue.id, Issue.photo_hash).where(
+                Issue.id != issue.id, Issue.photo_hash.is_not(None)))).all()
+            for oid, oh in others:
+                if ai_auth.hamming(h, oh) <= 6:   # near-identical image already filed
+                    novel = False
+                    break
+    scene_pass = None
+    for ev in (verdict.evidence or []):
+        if ev.get("stage") == "scene_gate":
+            scene_pass = bool(ev.get("is_scene"))
+    cc = await cluster_count(session, issue.cluster_id)
+    rtrust = await reporter_trust(session, issue.reporter_id)
+    a = ai_auth.assess(
+        has_photo=bool(photo_path), scene_pass=scene_pass, detections=verdict.detections,
+        reporter_trust=rtrust,
+        text_agrees=(verdict.category_suggestion == issue.category),
+        corroboration=max(0, cc - 1), novel_image=novel,
+    )
+    issue.authenticity_score = a.score
+    issue.authenticity = a.dict()
+
+
 async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> None:
-    """All AI (embed -> dedup -> verify -> priority) runs off the request path;
-    each result streams back over WebSocket as it lands."""
+    """All AI (embed -> dedup -> recurrence -> verify -> authenticity -> priority)
+    runs off the request path; each result streams back over WebSocket as it lands."""
     try:
         async with Session() as s:
             issue = await s.get(Issue, issue_id)
             if not issue:
                 return
-            # 1) embedding + spatio-semantic dedup
+            # 1) embedding + spatio-semantic dedup + recurrence
             emb = await asyncio.to_thread(text_embed, f"{issue.title}. {issue.description}")
             if emb is not None:
                 issue.embedding = [round(float(x), 5) for x in emb]
@@ -568,9 +699,11 @@ async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> No
                                       issue.created_at.timestamp(), emb)
             existing = [ai_dedup.Candidate(o.id, o.cluster_id, o.lat, o.lng, o.category,
                                            o.created_at.timestamp(), o.embedding) for o in open_issues]
-            cid, dist, _matched = ai_dedup.assign_cluster(cand, existing)
+            cid, dist, matched = ai_dedup.assign_cluster(cand, existing)
             issue.cluster_id = cid or issue.id
             issue.dedupe_distance = dist
+            issue.dedupe_matched_id = matched if cid and cid != issue.id else None
+            await _detect_recurrence(s, issue)
             await _recompute_priority(s, issue)
             await s.commit()
             await hub.broadcast({"type": "issue.updated", "issue": await issue_public(s, issue, None)})
@@ -584,12 +717,38 @@ async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> No
             issue.verification_confidence = verdict.confidence
             issue.detection_count = verdict.detections
             issue.severity = verdict.severity
-            issue.verification_note = verdict.note
+            if not issue.recurrence:
+                issue.verification_note = verdict.note
+            else:
+                issue.verification_note = verdict.note + " " + issue.verification_note
             issue.evidence = verdict.evidence
             issue.model_version = verdict.model_version
+
+            # 3) authenticity / anti-abuse
+            await _assess_authenticity(s, issue, photo_path, verdict)
+
+            # "AI Verified" is only granted with a genuine VISION match that is also
+            # plausibly authentic — OR independent corroboration (3+ citizen reports
+            # clustered at this spot). A confident-sounding text description with no
+            # photo is never auto-verified.
+            cc = await cluster_count(s, issue.cluster_id)
+            vision_ok = (verdict.verified and verdict.method == "vision"
+                         and issue.authenticity_score >= settings.authenticity_verify_min)
+            corroborated = cc >= 3 and issue.authenticity_score >= 0.45
+            if corroborated and not verdict.verified:
+                issue.verified = True
+                issue.verification_note += (f" Confirmed by corroboration — {cc} independent "
+                                            "citizen reports at this location.")
+            ok = vision_ok or corroborated
             if issue.status in ("Reported", "Verifying"):
-                issue.status = "Verified" if verdict.verified else "Reported"
+                issue.status = "Verified" if ok else "Reported"
+            if issue.recurrence and issue.priority in ("low", "medium"):
+                issue.priority = "high"  # chronic-spot escalation floor
+
             await _recompute_priority(s, issue)
+            if issue.recurrence and issue.priority in ("low", "medium"):
+                issue.priority = "high"
+            issue.eta_days = await _eta_days(s, issue.category, issue.priority)
             await s.commit()
             await hub.broadcast({"type": "issue.updated", "issue": await issue_public(s, issue, None)})
     except Exception as e:  # pragma: no cover
@@ -707,72 +866,111 @@ async def proof_wall(session: AsyncSession = Depends(get_session)):
 
 
 # ---- assistant ----
+import re as _re
+
+
+async def _area_stats(session: AsyncSession, lat: float, lng: float, radius: float, label: str) -> dict:
+    rows = (await session.execute(select(Issue))).scalars().all()
+    near = [r for r in rows if ai_dedup.haversine_m(lat, lng, r.lat, r.lng) <= radius]
+    openi = [r for r in near if r.status != "Resolved"]
+    res = [r for r in near if r.status == "Resolved"]
+    by_cat: dict[str, int] = {}
+    for r in openi:
+        by_cat[r.category] = by_cat.get(r.category, 0) + 1
+    spans = [(aware(r.resolved_at) - aware(r.created_at)).total_seconds() / 86400
+             for r in res if r.resolved_at]
+    return {
+        "label": label, "radius_m": int(radius),
+        "open": len(openi), "resolved": len(res),
+        "critical": sum(1 for r in openi if r.priority == "critical"),
+        "high": sum(1 for r in openi if r.priority == "high"),
+        "by_category": by_cat,
+        "avg_fix_days": round(sum(spans) / len(spans), 1) if spans else None,
+        "recurring": sum(1 for r in openi if r.recurrence),
+    }
+
+
 @app.post("/api/assistant/message")
 async def assistant_message(body: AssistantIn, user: User = Depends(get_current_user),
                             session: AsyncSession = Depends(get_session), request: Request = None):
-    async def lookup_status(iid: int):
-        i = await session.get(Issue, iid)
-        return None if not i else {
-            "id": i.id, "title": i.title, "status": i.status, "priority": i.priority,
-            "reporter_id": i.reporter_id, "verification_method": i.verification_method,
-            "verification_confidence": i.verification_confidence}
-
-    async def list_mine():
-        rows = (await session.execute(
-            select(Issue).where(Issue.reporter_id == user.id).order_by(Issue.created_at.desc()).limit(10)
-        )).scalars().all()
-        return [{"id": r.id, "title": r.title, "status": r.status} for r in rows]
-
-    async def list_nearby(lat, lng, radius):
-        rows = (await session.execute(select(Issue).where(Issue.status != "Resolved"))).scalars().all()
-        out = []
-        for r in rows:
-            d = ai_dedup.haversine_m(lat, lng, r.lat, r.lng)
-            if d <= radius:
-                out.append({"title": r.title, "priority": r.priority, "distance_m": int(d)})
-        return sorted(out, key=lambda x: x["distance_m"])
-
-    # the assistant is sync + template-only; pre-fetch DB reads, then hand it plain data
     latlng = (body.lat, body.lng) if body.lat is not None and body.lng is not None else None
-    prefetch_mine = await list_mine()
-    prefetch_nearby = await list_nearby(*latlng, 1500) if latlng else []
+    txt = body.text or ""
+
+    mine_rows = (await session.execute(
+        select(Issue).where(Issue.reporter_id == user.id).order_by(Issue.created_at.desc()).limit(10)
+    )).scalars().all()
+    mine = [await issue_public(session, r, user) for r in mine_rows]
+
+    nearby = []
+    if latlng:
+        allr = (await session.execute(select(Issue))).scalars().all()
+        for r in allr:
+            d = ai_dedup.haversine_m(latlng[0], latlng[1], r.lat, r.lng)
+            if d <= 1500:
+                p = await issue_public(session, r, user)
+                p["distance_m"] = int(d)
+                nearby.append(p)
+        nearby.sort(key=lambda x: x["distance_m"])
+
+    issue_ctx = None
+    m = _re.search(r"#?\s*(\d{1,6})", txt)
+    if m:
+        gi = await session.get(Issue, int(m.group(1)))
+        if gi:
+            issue_ctx = await issue_public(session, gi, user)
+
+    area = None
+    if latlng:
+        area = await _area_stats(session, latlng[0], latlng[1], 1200, "your location")
+
+    rank = None
+    board = (await session.execute(select(User).order_by(User.points.desc()).limit(50))).scalars().all()
+    for n, u in enumerate(board):
+        if u.id == user.id:
+            rank = n + 1
+    impact = {
+        "points": user.points, "rank": rank,
+        "reported": len(mine_rows), "resolved": sum(1 for r in mine_rows if r.status == "Resolved"),
+        "trust": ai_trust.trust_score(user.reports_valid, user.reports_invalid),
+        "valid": user.reports_valid, "invalid": user.reports_invalid,
+    }
 
     res = assistant.handle(
-        session_id=body.session_id, text=body.text, user_id=user.id,
-        lookup_status=lambda iid: None,   # status-by-id resolved below with a real await
-        list_mine=lambda: prefetch_mine,
-        list_nearby=lambda a, b, c: prefetch_nearby,
-        user_latlng=latlng,
+        session_id=body.session_id, text=txt, user_id=user.id,
+        ctx={"mine": mine, "nearby": nearby, "issue": issue_ctx, "area": area,
+             "impact": impact, "user_latlng": latlng},
     )
-    # status-by-id needs a real lookup; handle here if the assistant asked for it
-    if "#" in body.text or any(ch.isdigit() for ch in body.text):
-        digits = "".join(ch for ch in body.text if ch.isdigit())
-        if digits and res.get("intent") == "status":
-            rec = await lookup_status(int(digits))
-            if not rec:
-                res["reply"] = f"No report #{digits} found."
-            elif rec["reporter_id"] != user.id:
-                res["reply"] = "I can only show the status of reports you filed."
-            else:
-                res["reply"] = (f"Report #{rec['id']} — “{rec['title']}”\n"
-                                f"Status: {rec['status']} · priority {rec['priority']}\n"
-                                f"Verified: {rec['verification_method']} "
-                                f"({rec['verification_confidence']:.0%})")
 
     action = res.get("action")
     if action and action.get("type") == "create_issue":
         p = action["payload"]
         try:
             issue = await _create_issue(session, user, IssueIn(
-                title=p["title"], description=p.get("description", ""), category=p["category"],
+                title=p.get("title") or "Reported via CIVIA",
+                description=p.get("description", ""), category=p.get("category") or "Roads",
                 lat=p["lat"], lng=p["lng"], address=p.get("address", "")),
                 client_ip(request) if request else "assistant")
             res["reply"] = (f"Filed as report #{issue['id']} · priority {issue['priority']}. "
-                            f"{issue['verification_note']}")
+                            "I'm now running verification, duplicate and recurring-spot checks — "
+                            "open the report to watch the AI grade it live.")
             res["action"] = {"type": "issue_created", "issue_id": issue["id"]}
         except HTTPException as e:
             res["reply"] = f"Couldn't file that: {e.detail}"
             res["action"] = None
+    elif action and action.get("type") == "add_comment":
+        iid = action.get("issue_id")
+        gi = await session.get(Issue, iid) if iid else None
+        if not gi:
+            res["reply"] = f"I couldn't find report #{iid}."
+        elif gi.reporter_id != user.id:
+            res["reply"] = "I can only add notes to reports you filed."
+        else:
+            session.add(Comment(issue_id=iid, user_id=user.id, body=action["body"]))
+            user.points += 3
+            await session.commit()
+            await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, gi, None)})
+            res["reply"] = f"Added your note to report #{iid}. The team will see it on the issue."
+            res["action"] = {"type": "issue_created", "issue_id": iid}
     return res
 
 
@@ -837,6 +1035,20 @@ async def set_status(issue_id: int, body: StatusIn, request: Request,
         url, _ = await _decode_and_store(body.after_photo_base64, "after")
         if url:
             issue.after_photo_url = url
+            # verify the proof-of-fix photo: a real scene, and not just the
+            # 'before' image re-uploaded
+            apath = os.path.join(settings.upload_dir, os.path.basename(url))
+            ah = await asyncio.to_thread(ai_auth.dhash, apath)
+            scene = await asyncio.to_thread(ai_verify.scene_gate.check, apath,
+                                            issue.category if issue.category in settings.vision_categories else "Roads")
+            same = ai_auth.hamming(ah, issue.photo_hash) <= 6 if issue.photo_hash else False
+            issue.resolution_verified = bool(scene.is_scene and not same)
+            issue.resolution_note = (
+                f"Proof photo: scene {scene.score:.0%}"
+                + (" · ⚠ identical to the original photo" if same else " · distinct from the original")
+                + (" — accepted." if issue.resolution_verified else " — needs review."))
+        else:
+            issue.resolution_note = "Resolved without a proof-of-fix photo."
         if rep:
             rep.points += 10
             rep.reports_valid += 1
@@ -898,5 +1110,12 @@ if os.path.isdir(settings.frontend_dir):
     async def spa(full_path: str):
         cand = os.path.join(settings.frontend_dir, full_path)
         if full_path and os.path.isfile(cand):
-            return FileResponse(cand, media_type=_MIME.get(os.path.splitext(cand)[1].lower()))
-        return FileResponse(_index, media_type="text/html")
+            # hashed asset filenames -> safe to cache hard; everything else no-store
+            hashed = "/assets/" in ("/" + full_path) and any(
+                full_path.endswith(e) for e in (".js", ".css", ".woff2", ".woff"))
+            headers = {"Cache-Control": "public, max-age=31536000, immutable"} if hashed \
+                else {"Cache-Control": "no-store"}
+            return FileResponse(cand, media_type=_MIME.get(os.path.splitext(cand)[1].lower()),
+                                headers=headers)
+        # index.html must never be cached, or clients keep booting a stale bundle
+        return FileResponse(_index, media_type="text/html", headers={"Cache-Control": "no-store"})
