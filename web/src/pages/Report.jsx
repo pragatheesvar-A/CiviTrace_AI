@@ -2,7 +2,7 @@
 // with a live "already reported / recently fixed here" check before submit.
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fileToBase64, reverseGeocode, issuesAround } from "../api.jsx";
+import { api, fileToBase64, reverseGeocode, issuesAround, useLiveFeed } from "../api.jsx";
 import {
   Icon, VerificationChip, ConfidenceMeter, PriorityBadge, SectionLabel,
   EditorialTitle, GeoInput, Stepper, NearbyList,
@@ -62,6 +62,30 @@ export default function Report() {
     nav(`/issues/${id}`);
   }
 
+  // once the report is filed, watch the live feed and fold the AI result in-place
+  useLiveFeed(
+    React.useCallback((ev) => {
+      if (!result) return;
+      if (ev.type === "issue.updated" && String(ev.issue?.id) === String(result.id)) {
+        setResult(ev.issue);
+      }
+    }, [result])
+  );
+  // safety net: also poll a few times in case a WS frame is missed
+  useEffect(() => {
+    if (!result || result.verification_method !== "pending") return;
+    let n = 0;
+    const t = setInterval(async () => {
+      n += 1;
+      try {
+        const fresh = await api(`/issues/${result.id}`);
+        if (fresh.verification_method !== "pending") { setResult(fresh); clearInterval(t); }
+      } catch {}
+      if (n > 20) clearInterval(t);
+    }, 1500);
+    return () => clearInterval(t);
+  }, [result]);
+
   async function submit(e) {
     e.preventDefault();
     if (busy) return;
@@ -75,13 +99,18 @@ export default function Report() {
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   }
 
-  if (result)
+  if (result) {
+    const pending = result.verification_method === "pending";
     return (
       <div className="space-y-6 py-4 fadeup">
-        <div className="w-16 h-16 rounded-[20px] bg-secondary/15 flex items-center justify-center text-secondary">
-          <Icon name="task_alt" className="text-4xl" fill />
+        <div className={`w-16 h-16 rounded-[20px] flex items-center justify-center transition-colors ${
+          pending ? "bg-primary/10 text-primary" : "bg-secondary/15 text-secondary"}`}>
+          {pending
+            ? <span className="w-7 h-7 border-[3px] border-primary/25 border-t-primary rounded-full animate-spin" />
+            : <Icon name="task_alt" className="text-4xl" fill />}
         </div>
-        <EditorialTitle top="Report" accent="Submitted." />
+        <EditorialTitle top="Report" accent={pending ? "Received." : "Verified."} />
+
         <div className="bg-white rounded-3xl p-5 space-y-3 shadow-sm">
           <h3 className="font-bold text-lg">{result.title}</h3>
           <div className="flex gap-2 items-center flex-wrap">
@@ -90,16 +119,40 @@ export default function Report() {
               {result.cluster_count > 1 ? `Merged into a cluster of ${result.cluster_count}` : "New cluster"}
             </span>
           </div>
-          <ConfidenceMeter issue={result} />
-          <VerificationChip issue={result} />
-          <p className="text-sm text-on-variant border-l-2 border-primary/30 pl-3">{result.verification_note}</p>
-          {result.verification_method === "pending" && (
-            <p className="text-xs text-primary flex items-center gap-1">
-              <span className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-              AI is verifying the photo, checking for duplicates and past reports here — results appear on the issue page shortly.
-            </p>
+
+          {pending ? (
+            <div className="space-y-2.5 pt-1">
+              {[
+                ["photo_camera", "Reading the photo"],
+                ["policy", "Scene & object detection"],
+                ["content_copy", "Duplicate & recurring-spot check"],
+                ["verified_user", "Authenticity scoring"],
+              ].map(([ic, label], n) => (
+                <div key={label} className="flex items-center gap-2.5 text-sm">
+                  <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin"
+                    style={{ animationDelay: `${n * 0.15}s` }} />
+                  <Icon name={ic} className="text-base text-primary" />
+                  <span className="text-on-variant">{label}…</span>
+                </div>
+              ))}
+              <p className="text-xs text-on-variant pt-1">
+                This usually takes a few seconds — the score appears here automatically, no need to leave.
+              </p>
+            </div>
+          ) : (
+            <>
+              <ConfidenceMeter issue={result} />
+              <VerificationChip issue={result} />
+              <p className="text-sm text-on-variant border-l-2 border-primary/30 pl-3">{result.verification_note}</p>
+              {result.recurrence && (
+                <p className="text-xs font-semibold text-orange-600 flex items-center gap-1">
+                  <Icon name="history" className="text-sm" /> Flagged as a recurring / chronic spot — priority escalated.
+                </p>
+              )}
+            </>
           )}
         </div>
+
         <div className="flex gap-3">
           <button onClick={() => nav(`/issues/${result.id}`)} className="flex-1 py-3.5 rounded-full bg-primary text-white font-bold">View issue</button>
           <button onClick={() => { setResult(null); setF((s) => ({ ...s, title: "", description: "" })); setPhoto(null); setPreview(null); setLocked(false); setNear(null); }}
@@ -107,6 +160,7 @@ export default function Report() {
         </div>
       </div>
     );
+  }
 
   return (
     <form onSubmit={submit} className="space-y-7">

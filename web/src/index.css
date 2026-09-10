@@ -6,9 +6,12 @@
 
 :root { color-scheme: light; }
 
-html, body { background: #f8f9fa; color: #191c1d; }
+html, body { background: #f5f4f0; color: #1a1c1a; }
 body { font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-h1, h2, h3, .font-headline { font-family: "Space Grotesk", system-ui, sans-serif; }
+h1, h2, h3, .font-headline { font-family: "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.02em; }
+
+/* hairline card border for a crisper, more premium edge */
+.card-line { border: 1px solid rgba(26,28,26,0.06); }
 
 .material-symbols-outlined {
   font-family: "Material Symbols Outlined";
@@ -27,8 +30,8 @@ h1, h2, h3, .font-headline { font-family: "Space Grotesk", system-ui, sans-serif
 }
 .material-symbols-outlined.fill { font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24; }
 
-.glass { background: rgba(255,255,255,0.72); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-.glass-strong { background: rgba(255,255,255,0.86); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.glass { background: rgba(248,247,243,0.68); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); }
+.glass-strong { background: rgba(250,249,246,0.9); backdrop-filter: blur(26px) saturate(1.5); -webkit-backdrop-filter: blur(26px) saturate(1.5); border: 1px solid rgba(26,28,26,0.05); }
 
 .leaflet-container { border-radius: 0; font-family: inherit; }
 ::-webkit-scrollbar { width: 0; height: 0; }
@@ -36,8 +39,8 @@ h1, h2, h3, .font-headline { font-family: "Space Grotesk", system-ui, sans-serif
 
 .mesh-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .mesh-bg::before, .mesh-bg::after { content: ""; position: absolute; border-radius: 9999px; filter: blur(120px); }
-.mesh-bg::before { top: -12%; left: -12%; width: 55%; height: 55%; background: rgba(0,88,188,0.12); }
-.mesh-bg::after  { bottom: -12%; right: -12%; width: 55%; height: 55%; background: rgba(0,110,40,0.07); }
+.mesh-bg::before { top: -14%; left: -14%; width: 58%; height: 58%; background: rgba(13,92,99,0.10); }
+.mesh-bg::after  { bottom: -14%; right: -14%; width: 58%; height: 58%; background: rgba(194,112,61,0.08); }
 
 @keyframes sospulse {
   0% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(188,0,10,0.55); }

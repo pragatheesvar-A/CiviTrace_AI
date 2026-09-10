@@ -31,7 +31,7 @@ export const PriorityBadge = ({ p }) => <Badge tone={PRIORITY[p] || PRIORITY.low
 export const StatusBadge = ({ s }) => <Badge tone={STATUS[s] || STATUS.Reported}>{s}</Badge>;
 
 export const Card = ({ children, className = "" }) => (
-  <div className={`bg-white rounded-2xl p-5 shadow-sm shadow-blue-900/5 ${className}`}>{children}</div>
+  <div className={`bg-white rounded-2xl p-5 shadow-sm card-line ${className}`}>{children}</div>
 );
 
 export const SectionLabel = ({ children }) => (

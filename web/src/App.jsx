@@ -35,21 +35,21 @@ class ErrorBoundary extends React.Component {
 
 function BottomNav() {
   const tab = ({ isActive }) =>
-    `flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold uppercase tracking-widest transition-all active:scale-90 ${
-      isActive ? "text-primary" : "text-slate-400"
+    `flex flex-col items-center justify-center gap-1 text-[10px] font-semibold tracking-wide transition-all active:scale-90 ${
+      isActive ? "text-primary" : "text-on-variant/55"
     }`;
   return (
-    <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto z-40 glass flex justify-around items-end px-2 pt-2.5
-                    rounded-t-[1.75rem] shadow-[0_-10px_40px_rgba(0,0,0,0.06)]"
+    <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto z-40 glass-strong flex justify-around items-end px-2 pt-3
+                    rounded-t-[1.4rem] border-t border-on-surface/[0.06]"
          style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)" }}>
       <NavLink to="/" end className={tab}>{({ isActive }) => (<><Icon name="home" fill={isActive} />Home</>)}</NavLink>
-      <NavLink to="/map" className={tab}>{({ isActive }) => (<><Icon name="map" fill={isActive} />Map</>)}</NavLink>
-      <NavLink to="/report" className="flex flex-col items-center -mt-8 active:scale-90 transition-transform">
-        <div className="w-[58px] h-[58px] rounded-full bg-gradient-to-br from-primary to-primary-container
-                        flex items-center justify-center text-white shadow-xl shadow-primary/30">
-          <Icon name="add" className="text-3xl" />
+      <NavLink to="/map" className={tab}>{({ isActive }) => (<><Icon name="explore" fill={isActive} />Map</>)}</NavLink>
+      <NavLink to="/report" className="flex flex-col items-center -mt-7 active:scale-90 transition-transform">
+        <div className="w-[54px] h-[54px] rounded-[18px] bg-primary rotate-45
+                        flex items-center justify-center text-white shadow-lg shadow-primary/25">
+          <Icon name="add" className="text-2xl -rotate-45" />
         </div>
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mt-1">Report</span>
+        <span className="text-[10px] font-semibold tracking-wide text-on-variant/55 mt-1.5">Report</span>
       </NavLink>
       <NavLink to="/assistant" className={tab}>{({ isActive }) => (<><Icon name="forum" fill={isActive} />Assist</>)}</NavLink>
       <NavLink to="/profile" className={tab}>{({ isActive }) => (<><Icon name="person" fill={isActive} />Profile</>)}</NavLink>
@@ -64,14 +64,14 @@ function Shell({ children }) {
          style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <div className="mesh-bg" />
       <div className="relative z-10">
-        <header className="sticky top-0 z-40 glass px-5 py-3 flex justify-between items-center">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-white">
-              <Icon name="monitoring" className="text-lg" fill />
+        <header className="sticky top-0 z-40 glass px-5 py-3 flex justify-between items-center border-b border-on-surface/[0.06]">
+          <Link to="/" className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-[10px] bg-primary flex items-center justify-center text-white">
+              <Icon name="graph_3" className="text-base" fill />
             </div>
             <div className="leading-none">
-              <span className="text-lg font-bold font-headline bg-gradient-to-br from-primary to-primary-container bg-clip-text text-transparent">
-                CivicPulse
+              <span className="text-[17px] font-bold font-headline text-on-surface tracking-tight">
+                Civic<span className="text-primary">Pulse</span>
               </span>
               {user?.role === "authority" &&
                 <span className="block text-[9px] font-bold uppercase tracking-[0.2em] text-primary mt-0.5">Authority</span>}

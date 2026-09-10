@@ -126,10 +126,10 @@ export default function Home() {
 
 const Tile = ({ to, icon, label, solid }) => (
   <Link to={to}
-    className={`p-5 rounded-2xl h-32 flex flex-col justify-between active:scale-[0.98] transition-transform ${
-      solid ? "bg-primary text-white shadow-lg shadow-primary/20" : "glass border border-white/50"
+    className={`p-4 rounded-2xl h-28 flex flex-col justify-between active:scale-[0.98] transition-transform ${
+      solid ? "bg-primary text-white" : "bg-white card-line"
     }`}>
-    <Icon name={icon} className={`text-3xl ${solid ? "" : "text-primary"}`} fill={solid} />
-    <span className={`font-bold text-lg leading-none ${solid ? "" : "text-on-surface"}`}>{label}</span>
+    <Icon name={icon} className={`text-2xl ${solid ? "" : "text-primary"}`} fill={solid} />
+    <span className={`font-bold text-[15px] leading-tight ${solid ? "" : "text-on-surface"}`}>{label}</span>
   </Link>
 );

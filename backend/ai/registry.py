@@ -35,7 +35,9 @@ class _Registry:
         try:
             import os as _os
 
-            n = max(1, (_os.cpu_count() or 4) // 2)
+            # Inference runs on a single-consumer queue (one job at a time), so let
+            # each job use most of the box for low latency — leave 1 core for the API.
+            n = max(1, (_os.cpu_count() or 4) - 1)
             import torch
 
             torch.set_num_threads(n)
