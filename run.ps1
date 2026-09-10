@@ -1,11 +1,13 @@
-# CivicPulse — one-command local run (Windows PowerShell)
-# Builds the React frontend, then starts the FastAPI backend which serves it.
-
+# CivicPulse — one command: build the React app, then serve everything from FastAPI.
+# Open http://localhost:8010
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
-Write-Host "==> Installing backend deps" -ForegroundColor Cyan
+Write-Host "==> Backend deps" -ForegroundColor Cyan
 pip install -q -r "$root\backend\requirements.txt"
+
+Write-Host "==> Fetching AI model weights (first run only)" -ForegroundColor Cyan
+python "$root\backend\scripts\fetch_models.py"
 
 Write-Host "==> Building frontend" -ForegroundColor Cyan
 Push-Location "$root\web"
@@ -13,7 +15,7 @@ if (-not (Test-Path node_modules)) { npm install --no-audit --no-fund }
 npm run build
 Pop-Location
 
-Write-Host "==> Starting CivicPulse on http://localhost:8010" -ForegroundColor Green
+Write-Host "==> CivicPulse on http://localhost:8010" -ForegroundColor Green
 Push-Location "$root\backend"
-uvicorn main:app --host 0.0.0.0 --port 8010
+python serve.py
 Pop-Location

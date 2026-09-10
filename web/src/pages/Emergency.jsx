@@ -5,9 +5,9 @@ import { api } from "../api.jsx";
 import { Icon, EditorialTitle } from "../ui.jsx";
 
 const QUICK = [
-  { icon: "car_crash", label: "Accident", cat: "Roads" },
-  { icon: "local_fire_department", label: "Fire", cat: "Public Property" },
-  { icon: "water_drop", label: "Flooding", cat: "Drainage" },
+  { icon: "car_crash", label: "Accident", cat: "Traffic" },
+  { icon: "local_fire_department", label: "Fire", cat: "Safety" },
+  { icon: "water_drop", label: "Flooding", cat: "Flooding" },
 ];
 
 export default function Emergency() {
@@ -51,7 +51,7 @@ export default function Emergency() {
           <div className="absolute inset-4 bg-error/10 rounded-full animate-ping" />
           <button
             disabled={busy}
-            onClick={() => trigger("General SOS", "Public Property")}
+            onClick={() => trigger("General SOS", "Safety")}
             className="sos-pulse relative w-48 h-48 rounded-full bg-gradient-to-br from-error to-[#e2241f] flex flex-col items-center justify-center text-white z-10 active:scale-95 transition-transform shadow-2xl disabled:opacity-70"
           >
             <Icon name="e911_emergency" className="text-5xl mb-1" fill />

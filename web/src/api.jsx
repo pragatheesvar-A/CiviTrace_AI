@@ -1,30 +1,60 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 
-const TOKEN_KEY = "civicpulse_token";
+const ACCESS = "civicpulse_access";
+const REFRESH = "civicpulse_refresh";
 
-export function getToken() {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+const ls = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} },
+};
+
+export const getAccess = () => ls.get(ACCESS);
+const setTokens = (a, r) => { ls.set(ACCESS, a || ""); if (r !== undefined) ls.set(REFRESH, r || ""); };
+const clearTokens = () => { ls.set(ACCESS, ""); ls.set(REFRESH, ""); };
+
+let refreshing = null;
+async function tryRefresh() {
+  const rt = ls.get(REFRESH);
+  if (!rt) return false;
+  if (!refreshing) {
+    refreshing = fetch("/api/auth/refresh", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: rt }),
+    }).then(async (r) => {
+      if (!r.ok) { clearTokens(); return false; }
+      const d = await r.json();
+      setTokens(d.access_token, d.refresh_token);
+      return true;
+    }).catch(() => false).finally(() => { refreshing = null; });
+  }
+  return refreshing;
 }
-function setToken(t) {
-  try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {}
-}
 
-export async function api(path, { method = "GET", body, auth = true } = {}) {
+export async function api(path, { method = "GET", body, auth = true, retry = true } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const token = getToken();
-  if (auth && token) headers["Authorization"] = `Bearer ${token}`;
+  const token = getAccess();
+  if (auth && token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`/api${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && auth && retry && (await tryRefresh())) {
+    return api(path, { method, body, auth, retry: false });
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) throw new Error(data?.detail || `Request failed (${res.status})`);
   return data;
 }
 
+// ---- public app config (map provider, assistant name) ----
+export function useConfig() {
+  const [cfg, setCfg] = useState(null);
+  useEffect(() => { api("/config", { auth: false }).then(setCfg).catch(() => setCfg({})); }, []);
+  return cfg;
+}
+
+// ---- auth context ----
 const AuthCtx = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -32,38 +62,51 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    // Demo shortcut: ?demo=citizen|authority auto-logs-in a seeded account.
+    // demo shortcut: ?demo=citizen|authority (QA / screenshots only)
     const demo = new URLSearchParams(location.search).get("demo");
-    if (demo && !getToken()) {
+    if (demo && !getAccess()) {
       try {
-        const creds = demo === "authority"
-          ? { email: "authority@chennai.gov.in", password: "authority123" }
-          : { email: "alex@example.com", password: "citizen123" };
-        const d = await api("/auth/login", { method: "POST", body: creds, auth: false });
-        setToken(d.token);
+        const d = await api("/auth/login", {
+          method: "POST", auth: false,
+          body: demo === "authority"
+            ? { email: "authority@chennai.gov.in", password: "authority123" }
+            : { email: "alex@example.com", password: "citizen123" },
+        });
+        setTokens(d.access_token, d.refresh_token);
         history.replaceState(null, "", location.pathname);
       } catch {}
     }
-    if (!getToken()) { setUser(null); setLoading(false); return; }
-    try { setUser(await api("/auth/me")); }
-    catch { setToken(null); setUser(null); }
-    finally { setLoading(false); }
+    if (!getAccess() && !ls.get(REFRESH)) { setUser(null); setLoading(false); return; }
+    try {
+      setUser(await api("/auth/me"));
+    } catch {
+      clearTokens(); setUser(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  async function login(email, password) {
-    const d = await api("/auth/login", { method: "POST", body: { email, password }, auth: false });
-    setToken(d.token); setUser(d.user); return d.user;
-  }
-  async function register(payload) {
-    const d = await api("/auth/register", { method: "POST", body: payload, auth: false });
-    setToken(d.token); setUser(d.user); return d.user;
-  }
-  function logout() { setToken(null); setUser(null); }
+  const finish = (d) => { setTokens(d.access_token, d.refresh_token); setUser(d.user); return d.user; };
 
   return (
-    <AuthCtx.Provider value={{ user, loading, login, register, logout, refresh, setUser }}>
+    <AuthCtx.Provider value={{
+      user, loading, setUser, refresh,
+      loginPassword: async (email, password, totp) =>
+        finish(await api("/auth/login", { method: "POST", auth: false, body: { email, password, totp } })),
+      register: async (payload) =>
+        finish(await api("/auth/register", { method: "POST", auth: false, body: payload })),
+      otpRequest: (email, name, role) =>
+        api("/auth/otp/request", { method: "POST", auth: false, body: { email, name, role } }),
+      otpVerify: async (email, code) =>
+        finish(await api("/auth/otp/verify", { method: "POST", auth: false, body: { email, code } })),
+      logout: async () => {
+        const rt = ls.get(REFRESH);
+        if (rt) { try { await api("/auth/logout", { method: "POST", auth: false, body: { refresh_token: rt } }); } catch {} }
+        clearTokens(); setUser(null);
+      },
+    }}>
       {children}
     </AuthCtx.Provider>
   );
@@ -71,16 +114,24 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthCtx);
 
+// ---- live websocket feed ----
 export function useLiveFeed(onEvent) {
+  const cb = useRef(onEvent);
+  cb.current = onEvent;
   useEffect(() => {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    let ws;
-    try {
-      ws = new WebSocket(`${proto}://${location.host}/ws`);
-      ws.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch {} };
-    } catch {}
-    return () => { try { ws && ws.close(); } catch {} };
-  }, [onEvent]);
+    let ws, dead = false, timer;
+    const connect = () => {
+      if (dead) return;
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      try {
+        ws = new WebSocket(`${proto}://${location.host}/ws`);
+        ws.onmessage = (e) => { try { cb.current(JSON.parse(e.data)); } catch {} };
+        ws.onclose = () => { if (!dead) timer = setTimeout(connect, 3000); };
+      } catch { timer = setTimeout(connect, 3000); }
+    };
+    connect();
+    return () => { dead = true; clearTimeout(timer); try { ws && ws.close(); } catch {} };
+  }, []);
 }
 
 export function fileToBase64(file) {
@@ -90,4 +141,29 @@ export function fileToBase64(file) {
     r.onerror = reject;
     r.readAsDataURL(file);
   });
+}
+
+// ---- forward + reverse geocoding (Photon / Komoot — keyless, CORS-enabled) ----
+const GEO = "https://photon.komoot.io";
+export async function geocode(q, lat, lng) {
+  if (!q || q.trim().length < 2) return [];
+  let url = `${GEO}/api/?q=${encodeURIComponent(q)}&limit=6&lang=en`;
+  if (lat != null && lng != null) url += `&lat=${lat}&lon=${lng}`;
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    return (d.features || []).map((f) => ({
+      label: [f.properties.name, f.properties.street, f.properties.city, f.properties.state, f.properties.country]
+        .filter(Boolean).join(", "),
+      lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0],
+    }));
+  } catch { return []; }
+}
+export async function reverseGeocode(lat, lng) {
+  try {
+    const r = await fetch(`${GEO}/reverse?lat=${lat}&lon=${lng}&lang=en`);
+    const d = await r.json();
+    const p = d.features?.[0]?.properties || {};
+    return [p.name, p.street, p.district, p.city, p.state].filter(Boolean).join(", ");
+  } catch { return ""; }
 }

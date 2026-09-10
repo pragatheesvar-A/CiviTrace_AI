@@ -1,10 +1,10 @@
 // Converted from stitch mockup: issue_details/
 import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api, useAuth, fileToBase64 } from "../api.jsx";
-import { Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, fmtAgo } from "../ui.jsx";
+import { api, useAuth, useLiveFeed, fileToBase64 } from "../api.jsx";
+import { Icon, Spinner, PriorityBadge, StatusBadge, VerificationChip, ConfidenceMeter, fmtAgo } from "../ui.jsx";
 
-const FLOW = ["Reported", "Verified", "Assigned", "In Progress", "Resolved"];
+const FLOW = ["Verifying", "Verified", "Assigned", "In Progress", "Resolved"];
 
 export default function IssueDetail() {
   const { id } = useParams();
@@ -14,7 +14,10 @@ export default function IssueDetail() {
   const [comment, setComment] = useState("");
 
   const load = useCallback(() => api(`/issues/${id}`).then(setI).catch(() => setI(false)), [id]);
-  useEffect(load, [load]);
+  useEffect(() => { load(); }, [load]);
+  useLiveFeed(useCallback((ev) => {
+    if (ev.type === "issue.updated" && String(ev.issue?.id) === String(id)) setI(ev.issue);
+  }, [id]));
 
   if (i === false) return <p className="py-24 text-center text-on-variant">Issue not found.</p>;
   if (!i) return <Spinner />;
@@ -83,7 +86,8 @@ export default function IssueDetail() {
           </p>
           {i.description && <p className="text-on-surface leading-relaxed">{i.description}</p>}
 
-          <div className="mt-4 pt-4 border-t border-surface-high space-y-2">
+          <div className="mt-4 pt-4 border-t border-surface-high space-y-3">
+            <ConfidenceMeter issue={i} />
             <VerificationChip issue={i} />
             <p className="text-sm text-on-variant border-l-2 border-primary/30 pl-3">{i.verification_note}</p>
             {i.cluster_count > 1 && (
@@ -111,7 +115,8 @@ export default function IssueDetail() {
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <div className="flex justify-between">
             {FLOW.map((s, n) => {
-              const done = FLOW.indexOf(i.status) >= n;
+              const cur = i.status === "Reported" ? 0 : FLOW.indexOf(i.status);
+              const done = cur >= n;
               return (
                 <div key={s} className="flex flex-col items-center gap-1 flex-1">
                   <div className={`w-3 h-3 rounded-full ${done ? "bg-primary" : "bg-slate-300"}`} />
@@ -126,7 +131,7 @@ export default function IssueDetail() {
           <div className="bg-primary/5 rounded-2xl p-4 space-y-2">
             <p className="text-xs font-bold uppercase tracking-widest text-primary">Authority controls</p>
             <div className="flex flex-wrap gap-2">
-              {FLOW.map((s) => (
+              {["Verified", "Assigned", "In Progress", "Resolved", "Rejected"].map((s) => (
                 <button key={s} onClick={() => setStatus(s)}
                   className={`px-3 py-1.5 rounded-full text-xs font-bold ${
                     i.status === s ? "bg-primary text-white" : "bg-white text-on-variant"

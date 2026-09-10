@@ -1,170 +1,66 @@
 """
-CivicPulse backend — FastAPI + SQLAlchemy (async) + SQLite.
+CivicPulse API — AI-driven civic intelligence backend.
 
-End-to-end API for the civic issue reporting platform:
-auth (JWT + roles), issue reporting, AI verification pipeline,
-proximity deduplication, priority scoring, community layer
-(upvotes / adopt / comments / civic points / leaderboard),
-authority triage queue + KPI dashboard + rainfall digital-twin,
-and a WebSocket channel for live updates.
-
-Honest note: the vision "verification" here is a deterministic heuristic
-stand-in for the CLIP + YOLOv8 pipeline described in the product write-up.
-It models the same two-stage gate (scene relevance -> object detection)
-so the API contract and downstream priority logic are real and testable.
+FastAPI + async SQLAlchemy (SQLite, swap DB_URL for Postgres).
+Real models: CLIP scene gate, YOLOv8 pothole detector, MiniLM text/embeddings,
+sklearn priority. Grounded assistant "Aarambh". Security: rotating refresh
+tokens, rate limits, lockout, TOTP 2FA, security headers, EXIF/face scrubbing.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
-import hashlib
 import io
-import math
 import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import bcrypt
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from jose import JWTError, jwt
-from PIL import Image
+from jose import JWTError
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func, select,
-)
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, selectinload
 
-# --------------------------------------------------------------------------- #
-# Config
-# --------------------------------------------------------------------------- #
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_URL = os.environ.get("CIVICPULSE_DB", f"sqlite+aiosqlite:///{os.path.join(BASE_DIR, 'civicpulse.db')}")
-UPLOAD_DIR = os.path.join(os.path.dirname(BASE_DIR), "uploads")
-FRONTEND_DIR = os.path.join(os.path.dirname(BASE_DIR), "frontend")
-SECRET_KEY = os.environ.get("CIVICPULSE_SECRET", "dev-secret-change-me-in-prod")
-ALGORITHM = "HS256"
-TOKEN_TTL_MIN = 60 * 24 * 7
+import auth as A
+from ai import registry, verify as ai_verify, dedup as ai_dedup, priority as ai_priority, trust as ai_trust
+from ai.assistant import assistant, ASSISTANT_NAME
+from ai.text_classifier import embed as text_embed
+from config import settings
+from models import AuditLog, Base, Comment, Issue, OtpCode, RefreshToken, User, Vote, utcnow
+from security import (SecurityHeadersMiddleware, global_limiter, report_limiter, sanitize_image)
 
-CATEGORIES = ["Roads", "Sanitation", "Utilities", "Drainage", "Public Property"]
-VISION_CATEGORIES = {"Roads"}
-DEDUPE_RADIUS_M = 60.0
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-engine = create_async_engine(DB_URL, echo=False)
+engine = create_async_engine(settings.db_url, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 # --------------------------------------------------------------------------- #
-# Models
-# --------------------------------------------------------------------------- #
-class Base(DeclarativeBase):
-    pass
-
-
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-class User(Base):
-    __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(120))
-    password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(20), default="citizen")  # citizen | authority
-    points: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class Issue(Base):
-    __tablename__ = "issues"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str] = mapped_column(String(200))
-    description: Mapped[str] = mapped_column(Text, default="")
-    category: Mapped[str] = mapped_column(String(40), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="Reported", index=True)
-    # Reported -> Verified -> Assigned -> In Progress -> Resolved
-    priority: Mapped[str] = mapped_column(String(20), default="medium", index=True)
-    lat: Mapped[float] = mapped_column(Float)
-    lng: Mapped[float] = mapped_column(Float)
-    address: Mapped[str] = mapped_column(String(255), default="")
-    photo_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    after_photo_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-
-    verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    verification_method: Mapped[str] = mapped_column(String(20), default="none")  # vision | text | none
-    verification_confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    detection_count: Mapped[int] = mapped_column(Integer, default=0)
-    verification_note: Mapped[str] = mapped_column(String(255), default="")
-
-    cluster_id: Mapped[int] = mapped_column(Integer, index=True, default=0)
-    upvotes: Mapped[int] = mapped_column(Integer, default=0)
-
-    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    reporter: Mapped[User] = relationship(lazy="selectin")
-    comments: Mapped[list["Comment"]] = relationship(
-        back_populates="issue", lazy="selectin", cascade="all, delete-orphan"
-    )
-
-
-class Vote(Base):
-    __tablename__ = "votes"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    kind: Mapped[str] = mapped_column(String(10), default="up")  # up | adopt
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class Comment(Base):
-    __tablename__ = "comments"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    body: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-    issue: Mapped[Issue] = relationship(back_populates="comments")
-    user: Mapped[User] = relationship(lazy="selectin")
-
-
-# --------------------------------------------------------------------------- #
-# Auth helpers
-# --------------------------------------------------------------------------- #
-def hash_pw(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
-
-
-def verify_pw(pw: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(pw.encode(), hashed.encode())
-    except ValueError:
-        return False
-
-
-def make_token(user: User) -> str:
-    payload = {
-        "sub": str(user.id),
-        "role": user.role,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MIN),
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-
 async def get_session() -> AsyncSession:
     async with Session() as s:
         yield s
 
 
-from fastapi import Header  # noqa: E402
+def aware(dt: Optional[datetime]) -> Optional[datetime]:
+    """SQLite returns naive datetimes; coerce to UTC-aware for safe comparison."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def client_ip(req: Request) -> str:
+    return (req.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (req.client.host if req.client else "?"))
+
+
+async def audit(s: AsyncSession, *, actor: Optional[User], action: str, target: str = "",
+                ip: str = "", **meta):
+    s.add(AuditLog(actor_id=actor.id if actor else None,
+                   actor_role=actor.role if actor else "",
+                   action=action, target=target, ip=ip, meta=meta))
 
 
 async def get_current_user(
@@ -172,194 +68,147 @@ async def get_current_user(
     authorization: Optional[str] = Header(default=None),
 ) -> User:
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
-    token = authorization.split(" ", 1)[1]
+        raise HTTPException(401, "Missing bearer token")
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = A.decode(authorization.split(" ", 1)[1])
+        if payload.get("typ") != "access":
+            raise HTTPException(401, "Wrong token type")
         uid = int(payload["sub"])
     except (JWTError, KeyError, ValueError):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+        raise HTTPException(401, "Invalid or expired token")
     user = await session.get(User, uid)
     if not user:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+        raise HTTPException(401, "User not found")
     return user
+
+
+async def maybe_user(session: AsyncSession, authorization: Optional[str]) -> Optional[User]:
+    if not authorization:
+        return None
+    try:
+        return await get_current_user(session, authorization)
+    except HTTPException:
+        return None
 
 
 async def require_authority(user: User = Depends(get_current_user)) -> User:
     if user.role != "authority":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Authority role required")
+        raise HTTPException(403, "Authority role required")
+    if settings.require_authority_2fa and not user.totp_enabled:
+        raise HTTPException(403, "2FA enrolment required for authority accounts")
     return user
 
 
-# --------------------------------------------------------------------------- #
-# AI verification pipeline (deterministic stand-in for CLIP + YOLOv8)
-# --------------------------------------------------------------------------- #
-POTHOLE_WORDS = ("pothole", "crater", "road", "asphalt", "tarmac", "street", "pavement", "crack")
-SANITATION_WORDS = ("garbage", "trash", "waste", "overflow", "bin", "dump", "litter", "sewage")
-UTILITY_WORDS = ("streetlight", "light", "wire", "pole", "transformer", "power", "cable", "lamp")
-DRAINAGE_WORDS = ("drain", "flood", "water", "clog", "overflow", "stagnant", "sewer", "manhole")
-PROPERTY_WORDS = ("bench", "sign", "wall", "fence", "playground", "graffiti", "broken", "vandal")
-
-CATEGORY_WORDS = {
-    "Roads": POTHOLE_WORDS,
-    "Sanitation": SANITATION_WORDS,
-    "Utilities": UTILITY_WORDS,
-    "Drainage": DRAINAGE_WORDS,
-    "Public Property": PROPERTY_WORDS,
-}
+async def rate_limit(request: Request):
+    if not global_limiter.allow(client_ip(request)):
+        raise HTTPException(429, "Too many requests — slow down")
 
 
-def _seeded_float(*parts: str) -> float:
-    h = hashlib.sha256("::".join(parts).encode()).hexdigest()
-    return int(h[:8], 16) / 0xFFFFFFFF
+# --------------------------------------------------------------------------- helpers
+async def reporter_trust(session: AsyncSession, uid: int) -> float:
+    u = await session.get(User, uid)
+    return ai_trust.trust_score(u.reports_valid, u.reports_invalid) if u else 0.5
 
 
-def _image_stats(path: str) -> Optional[dict]:
+def _decode_and_store_sync(b64: Optional[str], prefix: str) -> tuple[Optional[str], dict]:
+    if not b64:
+        return None, {}
+    if b64.strip().startswith("data:") and "," in b64:
+        b64 = b64.split(",", 1)[1]
     try:
-        with Image.open(path) as im:
-            im = im.convert("RGB")
-            w, h = im.size
-            small = im.resize((32, 32))
-            px = list(small.getdata())
-            n = len(px)
-            avg = tuple(sum(c[i] for c in px) / n for i in range(3))
-            # grey-ish, mid-brightness scenes read as "road surface" more often
-            greyness = 1.0 - (max(avg) - min(avg)) / 255.0
-            brightness = sum(avg) / 3 / 255.0
-            return {"w": w, "h": h, "greyness": greyness, "brightness": brightness}
+        raw = base64.b64decode(b64)
     except Exception:
-        return None
+        raise HTTPException(400, "Bad image encoding")
+    clean, meta = sanitize_image(raw)
+    fname = f"{prefix}_{int(time.time()*1000)}_{os.urandom(3).hex()}.jpg"
+    with open(os.path.join(settings.upload_dir, fname), "wb") as f:
+        f.write(clean)
+    return f"/uploads/{fname}", meta
 
 
-def run_verification(category: str, title: str, description: str, photo_path: Optional[str]) -> dict:
-    """Return verification verdict dict for an issue."""
-    text = f"{title} {description}".lower()
-    words = CATEGORY_WORDS.get(category, ())
-    text_hits = sum(1 for w in words if w in text)
-    text_score = min(1.0, 0.35 + 0.16 * text_hits) if text_hits else 0.2
+async def _decode_and_store(b64: Optional[str], prefix: str) -> tuple[Optional[str], dict]:
+    try:
+        return await asyncio.to_thread(_decode_and_store_sync, b64, prefix)
+    except ValueError as e:
+        raise HTTPException(413, str(e))
 
-    if category in VISION_CATEGORIES and photo_path and os.path.exists(photo_path):
-        stats = _image_stats(photo_path)
-        if stats is None:
-            return {
-                "verified": False, "method": "none", "confidence": 0.0,
-                "detections": 0, "note": "Photo unreadable; not verified",
-            }
-        # Stage 1 — scene relevance gate (CLIP stand-in): is this a road/street?
-        base = _seeded_float("clip", os.path.basename(photo_path), text)
-        scene_score = 0.45 * base + 0.35 * stats["greyness"] + 0.20 * (1 - abs(stats["brightness"] - 0.5) * 2)
-        scene_score = round(min(0.99, scene_score + 0.12 * text_hits), 3)
-        if scene_score < 0.45:
-            return {
-                "verified": False, "method": "vision", "confidence": scene_score,
-                "detections": 0,
-                "note": f"Stage 1 gate failed: photo does not appear to show a road surface ({scene_score:.0%})",
-            }
-        # Stage 2 — pothole detector (YOLOv8 stand-in): per-detection confidence + count
-        det_base = _seeded_float("yolo", os.path.basename(photo_path), title)
-        det_conf = round(min(0.98, 0.55 + 0.4 * det_base + 0.05 * text_hits), 3)
-        count = 1
-        if det_base > 0.62:
-            count = 2
-        if det_base > 0.85:
-            count = 3
-        note = f"Stage 1 road-scene {scene_score:.0%} -> Stage 2 detected {count} pothole(s) @ {det_conf:.0%}"
-        return {
-            "verified": det_conf >= 0.6, "method": "vision",
-            "confidence": det_conf, "detections": count, "note": note,
-        }
 
-    # Non-vision categories (or Roads with no photo): honest weaker text signal
-    verified = text_score >= 0.6
-    note = (
-        f"Text classifier: {text_hits} '{category}' keyword(s) matched "
-        f"(weaker signal than vision verification)"
-    )
+async def cluster_count(session: AsyncSession, cid: int) -> int:
+    return await session.scalar(
+        select(func.count()).select_from(Issue).where(Issue.cluster_id == cid)
+    ) or 1
+
+
+async def issue_public(session: AsyncSession, i: Issue, viewer: Optional[User]) -> dict:
+    reporter = await session.get(User, i.reporter_id)
+    comments = (await session.execute(
+        select(Comment).where(Comment.issue_id == i.id).order_by(Comment.created_at)
+    )).scalars().all()
+    cusers = {c.user_id: await session.get(User, c.user_id) for c in comments}
+    cc = await cluster_count(session, i.cluster_id)
+    voted = adopted = False
+    if viewer:
+        kinds = (await session.execute(
+            select(Vote.kind).where(Vote.issue_id == i.id, Vote.user_id == viewer.id)
+        )).scalars().all()
+        voted, adopted = "up" in kinds, "adopt" in kinds
+    rtrust = ai_trust.trust_score(reporter.reports_valid, reporter.reports_invalid) if reporter else 0.5
     return {
-        "verified": verified, "method": "text", "confidence": round(text_score, 3),
-        "detections": 0, "note": note,
+        "id": i.id, "title": i.title, "description": i.description, "category": i.category,
+        "status": i.status, "priority": i.priority, "priority_score": i.priority_score,
+        "lat": i.lat, "lng": i.lng, "address": i.address, "ward_weight": i.ward_weight,
+        "photo_url": i.photo_url, "after_photo_url": i.after_photo_url,
+        "verified": i.verified, "verification_method": i.verification_method,
+        "verification_confidence": i.verification_confidence,
+        "detection_count": i.detection_count, "severity": i.severity,
+        "verification_note": i.verification_note, "evidence": i.evidence or [],
+        "priority_explanation": i.priority_explanation or {},
+        "model_version": i.model_version,
+        "cluster_id": i.cluster_id, "cluster_count": cc, "dedupe_distance": i.dedupe_distance,
+        "upvotes": i.upvotes, "reporter": reporter.name if reporter else "—",
+        "reporter_id": i.reporter_id,
+        "reporter_trust": rtrust, "reporter_trust_band": ai_trust.trust_band(rtrust),
+        "created_at": i.created_at.isoformat(),
+        "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None,
+        "comments": [{"id": c.id, "body": c.body,
+                      "user": cusers[c.user_id].name if cusers.get(c.user_id) else "—",
+                      "created_at": c.created_at.isoformat()} for c in comments],
+        "has_voted": voted, "has_adopted": adopted,
     }
 
 
-def compute_priority(verdict: dict, upvotes: int, cluster_count: int) -> str:
-    if verdict["method"] == "vision" and verdict["detections"] >= 2:
-        return "critical"
-    score = 0.0
-    if verdict["verified"]:
-        score += 2.0 if verdict["method"] == "vision" else 1.0
-    score += verdict["confidence"] * 1.5
-    score += min(upvotes, 20) * 0.15
-    score += min(cluster_count, 15) * 0.25
-    if score >= 5.0:
-        return "critical"
-    if score >= 3.2:
-        return "high"
-    if score >= 1.6:
-        return "medium"
-    return "low"
+def user_public(u: User) -> dict:
+    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "points": u.points,
+            "trust": ai_trust.trust_score(u.reports_valid, u.reports_invalid),
+            "totp_enabled": u.totp_enabled}
 
 
-def haversine_m(lat1, lng1, lat2, lng2) -> float:
-    r = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lng2 - lng1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
-
-
-# --------------------------------------------------------------------------- #
-# WebSocket hub
-# --------------------------------------------------------------------------- #
-class Hub:
-    def __init__(self):
-        self.clients: list[WebSocket] = []
-
-    async def connect(self, ws: WebSocket):
-        await ws.accept()
-        self.clients.append(ws)
-
-    def disconnect(self, ws: WebSocket):
-        if ws in self.clients:
-            self.clients.remove(ws)
-
-    async def broadcast(self, message: dict):
-        dead = []
-        for ws in self.clients:
-            try:
-                await ws.send_json(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(ws)
-
-
-hub = Hub()
-
-
-# --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- schemas
 class RegisterIn(BaseModel):
     email: EmailStr
     name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     role: str = "citizen"
 
 
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+    totp: Optional[str] = None
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str
 
 
 class IssueIn(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(default="", max_length=4000)
     category: str
-    lat: float
-    lng: float
-    address: str = ""
-    photo_base64: Optional[str] = None  # data URL or raw base64
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    address: str = Field(default="", max_length=255)
+    photo_base64: Optional[str] = None
 
 
 class CommentIn(BaseModel):
@@ -369,126 +218,183 @@ class CommentIn(BaseModel):
 class StatusIn(BaseModel):
     status: str
     after_photo_base64: Optional[str] = None
+    reporter_feedback: Optional[str] = None  # "valid" | "invalid"
 
 
 class RainfallIn(BaseModel):
     rainfall_mm: float = Field(ge=0, le=500)
 
 
-def user_public(u: User) -> dict:
-    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "points": u.points}
+class AssistantIn(BaseModel):
+    text: str = Field(max_length=1000)
+    session_id: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
-async def issue_public(session: AsyncSession, i: Issue, viewer: Optional[User]) -> dict:
-    reporter = await session.get(User, i.reporter_id)
-    comment_rows = (await session.execute(
-        select(Comment).where(Comment.issue_id == i.id).order_by(Comment.created_at)
-    )).scalars().all()
-    comment_users = {
-        c.user_id: await session.get(User, c.user_id) for c in comment_rows
-    }
-    cluster_count = 1
-    if i.cluster_id:
-        cluster_count = await session.scalar(
-            select(func.count()).select_from(Issue).where(Issue.cluster_id == i.cluster_id)
-        )
-    voted = adopted = False
-    if viewer:
-        rows = (await session.execute(
-            select(Vote.kind).where(Vote.issue_id == i.id, Vote.user_id == viewer.id)
-        )).scalars().all()
-        voted = "up" in rows
-        adopted = "adopt" in rows
-    return {
-        "id": i.id, "title": i.title, "description": i.description, "category": i.category,
-        "status": i.status, "priority": i.priority, "lat": i.lat, "lng": i.lng,
-        "address": i.address, "photo_url": i.photo_url, "after_photo_url": i.after_photo_url,
-        "verified": i.verified, "verification_method": i.verification_method,
-        "verification_confidence": i.verification_confidence,
-        "detection_count": i.detection_count, "verification_note": i.verification_note,
-        "cluster_id": i.cluster_id, "cluster_count": cluster_count,
-        "upvotes": i.upvotes, "reporter": reporter.name if reporter else "—",
-        "created_at": i.created_at.isoformat(),
-        "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None,
-        "comments": [
-            {"id": c.id, "body": c.body,
-             "user": comment_users[c.user_id].name if comment_users.get(c.user_id) else "—",
-             "created_at": c.created_at.isoformat()}
-            for c in comment_rows
-        ],
-        "has_voted": voted, "has_adopted": adopted,
-    }
+# --------------------------------------------------------------------------- WS hub
+class Hub:
+    def __init__(self):
+        self.clients: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept(); self.clients.append(ws)
+
+    def drop(self, ws: WebSocket):
+        if ws in self.clients:
+            self.clients.remove(ws)
+
+    async def broadcast(self, msg: dict):
+        for ws in list(self.clients):
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                self.drop(ws)
 
 
-def _decode_photo(b64: Optional[str], prefix: str) -> Optional[str]:
-    if not b64:
-        return None
-    if "," in b64 and b64.strip().startswith("data:"):
-        b64 = b64.split(",", 1)[1]
-    try:
-        raw = base64.b64decode(b64)
-    except Exception:
-        return None
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(413, "Image too large (max 8MB)")
-    ext = "jpg"
-    try:
-        with Image.open(io.BytesIO(raw)) as im:
-            ext = (im.format or "JPEG").lower().replace("jpeg", "jpg")
-    except Exception:
-        raise HTTPException(400, "Not a valid image")
-    fname = f"{prefix}_{int(time.time()*1000)}_{_seeded_float(prefix, str(len(raw)))*1e6:.0f}.{ext}"
-    with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
-        f.write(raw)
-    return f"/uploads/{fname}"
+hub = Hub()
+
+# Single-consumer AI job queue — at most one heavy inference at a time, so a
+# burst of reports can never stall the API.
+ai_queue: "asyncio.Queue[tuple[int, Optional[str]]]" = asyncio.Queue()
 
 
-# --------------------------------------------------------------------------- #
-# App
-# --------------------------------------------------------------------------- #
+async def _ai_worker():
+    while True:
+        issue_id, photo_path = await ai_queue.get()
+        try:
+            await _process_in_background(issue_id, photo_path)
+        except Exception as e:  # pragma: no cover
+            print(f"[ai worker] {issue_id}: {e}", flush=True)
+        finally:
+            ai_queue.task_done()
+
+
+# --------------------------------------------------------------------------- app
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    await seed()
+    from seed import seed
+    await seed(Session)
+    registry.warmup()
+    worker = asyncio.create_task(_ai_worker())
     yield
+    worker.cancel()
 
 
-app = FastAPI(title="CivicPulse API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="CivicPulse API", version="2.0.0", lifespan=lifespan)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"] if settings.env == "prod" else ["*"],
+    allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "time": utcnow().isoformat(), "categories": CATEGORIES}
+    return {"ok": True, "time": utcnow().isoformat(), "categories": list(settings.categories),
+            "env": settings.env}
 
 
-# ---- Auth ---- #
+@app.get("/api/config")
+async def public_config():
+    return {
+        "assistant_name": ASSISTANT_NAME,
+        "map_provider": "google" if os.environ.get("CIVIC_GMAPS_KEY") else "maplibre",
+        "gmaps_key_present": bool(os.environ.get("CIVIC_GMAPS_KEY")),
+        "categories": list(settings.categories),
+        "vision_categories": list(settings.vision_categories),
+    }
+
+
+@app.get("/api/ai/status")
+async def ai_status():
+    return registry.status()
+
+
+# ---- auth ----
 @app.post("/api/auth/register")
-async def register(body: RegisterIn, session: AsyncSession = Depends(get_session)):
+async def register(body: RegisterIn, request: Request, session: AsyncSession = Depends(get_session)):
+    await rate_limit(request)
     if body.role not in ("citizen", "authority"):
-        raise HTTPException(400, "role must be citizen or authority")
-    exists = await session.scalar(select(User).where(User.email == body.email.lower()))
-    if exists:
+        raise HTTPException(400, "invalid role")
+    if await session.scalar(select(User).where(User.email == body.email.lower())):
         raise HTTPException(409, "Email already registered")
-    user = User(
-        email=body.email.lower(), name=body.name.strip(),
-        password_hash=hash_pw(body.password), role=body.role,
-    )
-    session.add(user)
+    u = User(email=body.email.lower(), name=body.name.strip(),
+             password_hash=A.hash_pw(body.password), role=body.role)
+    session.add(u)
+    await session.flush()
+    jti = A.new_jti()
+    session.add(RefreshToken(jti=jti, user_id=u.id))
+    await audit(session, actor=u, action="auth.register", ip=client_ip(request))
     await session.commit()
-    return {"token": make_token(user), "user": user_public(user)}
+    return {"access_token": A.make_access(u.id, u.role), "refresh_token": A.make_refresh(u.id, jti),
+            "user": user_public(u)}
 
 
 @app.post("/api/auth/login")
-async def login(body: LoginIn, session: AsyncSession = Depends(get_session)):
-    user = await session.scalar(select(User).where(User.email == body.email.lower()))
-    if not user or not verify_pw(body.password, user.password_hash):
+async def login(body: LoginIn, request: Request, session: AsyncSession = Depends(get_session)):
+    ip = client_ip(request)
+    if not global_limiter.allow(f"login:{ip}", cost=1):
+        raise HTTPException(429, "Too many attempts")
+    u = await session.scalar(select(User).where(User.email == body.email.lower()))
+    now = datetime.now(timezone.utc)
+    if u and aware(u.locked_until) and aware(u.locked_until) > now:
+        raise HTTPException(423, f"Account locked until {u.locked_until.isoformat()}")
+    if not u or not A.verify_pw(body.password, u.password_hash):
+        if u:
+            u.failed_logins += 1
+            if u.failed_logins >= settings.login_max_attempts:
+                u.locked_until = now + timedelta(minutes=settings.login_lockout_min)
+                u.failed_logins = 0
+            await audit(session, actor=u, action="auth.login_fail", ip=ip)
+            await session.commit()
         raise HTTPException(401, "Invalid credentials")
-    return {"token": make_token(user), "user": user_public(user)}
+    if u.totp_enabled and not A.totp_verify(u.totp_secret or "", body.totp or ""):
+        raise HTTPException(401, "2FA code required or incorrect")
+    u.failed_logins = 0
+    u.locked_until = None
+    jti = A.new_jti()
+    session.add(RefreshToken(jti=jti, user_id=u.id))
+    await audit(session, actor=u, action="auth.login", ip=ip)
+    await session.commit()
+    return {"access_token": A.make_access(u.id, u.role), "refresh_token": A.make_refresh(u.id, jti),
+            "user": user_public(u)}
+
+
+@app.post("/api/auth/refresh")
+async def refresh(body: RefreshIn, session: AsyncSession = Depends(get_session)):
+    try:
+        p = A.decode(body.refresh_token)
+        assert p.get("typ") == "refresh"
+        uid, jti = int(p["sub"]), p["jti"]
+    except Exception:
+        raise HTTPException(401, "Invalid refresh token")
+    tok = await session.get(RefreshToken, jti)
+    if not tok or tok.revoked or tok.user_id != uid:
+        raise HTTPException(401, "Refresh token revoked")
+    tok.revoked = True  # rotation
+    new = A.new_jti()
+    session.add(RefreshToken(jti=new, user_id=uid))
+    u = await session.get(User, uid)
+    await session.commit()
+    return {"access_token": A.make_access(uid, u.role), "refresh_token": A.make_refresh(uid, new)}
+
+
+@app.post("/api/auth/logout")
+async def logout(body: RefreshIn, session: AsyncSession = Depends(get_session)):
+    try:
+        p = A.decode(body.refresh_token)
+        tok = await session.get(RefreshToken, p.get("jti"))
+        if tok:
+            tok.revoked = True
+            await session.commit()
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.get("/api/auth/me")
@@ -496,22 +402,119 @@ async def me(user: User = Depends(get_current_user)):
     return user_public(user)
 
 
-# ---- Issues ---- #
+# ---- email OTP (real-time one-time code) ----
+class OtpRequestIn(BaseModel):
+    email: EmailStr
+    name: Optional[str] = None
+    role: str = "citizen"
+
+
+class OtpVerifyIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=4, max_length=8)
+
+
+def _send_otp_email(email: str, code: str) -> None:
+    """Prod: plug an email/SMS provider here. Dev: logged + returned in response."""
+    host = os.environ.get("CIVIC_SMTP_HOST")
+    if not host:
+        print(f"[OTP] {email} -> {code}", flush=True)
+        return
+    import smtplib
+    from email.mime.text import MIMEText
+    msg = MIMEText(f"Your CivicPulse verification code is {code}. It expires in 5 minutes.")
+    msg["Subject"] = "CivicPulse verification code"
+    msg["From"] = os.environ.get("CIVIC_SMTP_FROM", "no-reply@civicpulse.app")
+    msg["To"] = email
+    with smtplib.SMTP(host, int(os.environ.get("CIVIC_SMTP_PORT", "587"))) as sv:
+        sv.starttls()
+        if os.environ.get("CIVIC_SMTP_USER"):
+            sv.login(os.environ["CIVIC_SMTP_USER"], os.environ["CIVIC_SMTP_PASS"])
+        sv.send_message(msg)
+
+
+@app.post("/api/auth/otp/request")
+async def otp_request(body: OtpRequestIn, request: Request, session: AsyncSession = Depends(get_session)):
+    ip = client_ip(request)
+    if not global_limiter.allow(f"otp:{ip}", cost=3):
+        raise HTTPException(429, "Too many code requests")
+    email = body.email.lower()
+    import secrets as _s
+    code = f"{_s.randbelow(10**6):06d}"
+    session.add(OtpCode(email=email, code_hash=A.hash_pw(code), purpose="login",
+                        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5)))
+    exists = await session.scalar(select(User).where(User.email == email))
+    if not exists and body.name:
+        session.add(User(email=email, name=body.name.strip(),
+                         password_hash=A.hash_pw(_s.token_urlsafe(24)),
+                         role=body.role if body.role in ("citizen", "authority") else "citizen"))
+    await audit(session, actor=None, action="auth.otp_request", target=email, ip=ip)
+    await session.commit()
+    _send_otp_email(email, code)
+    resp = {"sent": True, "channel": "email", "expires_in": 300,
+            "new_user": exists is None}
+    if settings.env != "prod":
+        resp["dev_code"] = code  # shown only in dev for testing
+    return resp
+
+
+@app.post("/api/auth/otp/verify")
+async def otp_verify(body: OtpVerifyIn, request: Request, session: AsyncSession = Depends(get_session)):
+    email = body.email.lower()
+    row = await session.scalar(
+        select(OtpCode).where(OtpCode.email == email, OtpCode.consumed == False)  # noqa: E712
+        .order_by(OtpCode.created_at.desc()))
+    now = datetime.now(timezone.utc)
+    if not row or aware(row.expires_at) < now:
+        raise HTTPException(400, "Code expired — request a new one")
+    if row.attempts >= 5:
+        raise HTTPException(429, "Too many attempts — request a new code")
+    row.attempts += 1
+    if not A.verify_pw(body.code.strip(), row.code_hash):
+        await session.commit()
+        raise HTTPException(401, "Incorrect code")
+    row.consumed = True
+    user = await session.scalar(select(User).where(User.email == email))
+    if not user:
+        user = User(email=email, name=email.split("@")[0].title(),
+                    password_hash=A.hash_pw(os.urandom(16).hex()), role="citizen")
+        session.add(user)
+        await session.flush()
+    jti = A.new_jti()
+    session.add(RefreshToken(jti=jti, user_id=user.id))
+    await audit(session, actor=user, action="auth.otp_login", ip=client_ip(request))
+    await session.commit()
+    return {"access_token": A.make_access(user.id, user.role),
+            "refresh_token": A.make_refresh(user.id, jti), "user": user_public(user)}
+
+
+@app.post("/api/auth/2fa/setup")
+async def twofa_setup(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    secret = A.new_totp_secret()
+    user.totp_secret = secret
+    user.totp_enabled = False
+    await session.commit()
+    return {"secret": secret, "otpauth_uri": A.totp_uri(secret, user.email)}
+
+
+@app.post("/api/auth/2fa/verify")
+async def twofa_verify(payload: dict, user: User = Depends(get_current_user),
+                       session: AsyncSession = Depends(get_session)):
+    if not user.totp_secret or not A.totp_verify(user.totp_secret, payload.get("code", "")):
+        raise HTTPException(400, "Incorrect code")
+    user.totp_enabled = True
+    await audit(session, actor=user, action="auth.2fa_enabled")
+    await session.commit()
+    return {"enabled": True}
+
+
+# ---- issues ----
 @app.get("/api/issues")
-async def list_issues(
-    category: Optional[str] = None,
-    status_f: Optional[str] = None,
-    mine: bool = False,
-    session: AsyncSession = Depends(get_session),
-    authorization: Optional[str] = Header(default=None),
-):
-    viewer = None
-    if authorization:
-        try:
-            viewer = await get_current_user(session, authorization)
-        except HTTPException:
-            viewer = None
-    q = select(Issue).options(selectinload(Issue.comments), selectinload(Issue.reporter))
+async def list_issues(category: Optional[str] = None, status_f: Optional[str] = None,
+                      mine: bool = False, session: AsyncSession = Depends(get_session),
+                      authorization: Optional[str] = Header(default=None)):
+    viewer = await maybe_user(session, authorization)
+    q = select(Issue)
     if category:
         q = q.where(Issue.category == category)
     if status_f:
@@ -524,83 +527,125 @@ async def list_issues(
 
 
 @app.get("/api/issues/{issue_id}")
-async def get_issue(
-    issue_id: int, session: AsyncSession = Depends(get_session),
-    authorization: Optional[str] = Header(default=None),
-):
-    viewer = None
-    if authorization:
-        try:
-            viewer = await get_current_user(session, authorization)
-        except HTTPException:
-            viewer = None
+async def get_issue(issue_id: int, session: AsyncSession = Depends(get_session),
+                    authorization: Optional[str] = Header(default=None)):
+    viewer = await maybe_user(session, authorization)
     i = await session.get(Issue, issue_id)
     if not i:
         raise HTTPException(404, "Issue not found")
     return await issue_public(session, i, viewer)
 
 
-@app.post("/api/issues")
-async def create_issue(
-    body: IssueIn, user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
-):
-    if body.category not in CATEGORIES:
-        raise HTTPException(400, f"category must be one of {CATEGORIES}")
-    photo_url = _decode_photo(body.photo_base64, "issue")
-    photo_path = os.path.join(UPLOAD_DIR, os.path.basename(photo_url)) if photo_url else None
+async def _recompute_priority(session: AsyncSession, issue: Issue) -> None:
+    cc = await cluster_count(session, issue.cluster_id)
+    rtrust = await reporter_trust(session, issue.reporter_id)
+    pr = ai_priority.compute(
+        vision_conf=issue.verification_confidence if issue.verification_method == "vision" else 0.0,
+        detections=issue.detection_count, severity=issue.severity,
+        text_conf=issue.verification_confidence if issue.verification_method == "text" else 0.0,
+        cluster_size=cc, upvotes=issue.upvotes, reporter_trust=rtrust,
+        ward_weight=issue.ward_weight, category=issue.category,
+        text=f"{issue.title} {issue.description}",
+    )
+    issue.priority, issue.priority_score, issue.priority_explanation = pr.level, pr.score, pr.dict()
 
-    verdict = run_verification(body.category, body.title, body.description, photo_path)
 
-    # proximity + category dedupe
-    candidates = (await session.execute(
-        select(Issue).where(Issue.category == body.category, Issue.status != "Resolved")
-    )).scalars().all()
-    cluster_id = 0
-    for c in candidates:
-        if haversine_m(body.lat, body.lng, c.lat, c.lng) <= DEDUPE_RADIUS_M:
-            cluster_id = c.cluster_id or c.id
-            break
+async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> None:
+    """All AI (embed -> dedup -> verify -> priority) runs off the request path;
+    each result streams back over WebSocket as it lands."""
+    try:
+        async with Session() as s:
+            issue = await s.get(Issue, issue_id)
+            if not issue:
+                return
+            # 1) embedding + spatio-semantic dedup
+            emb = await asyncio.to_thread(text_embed, f"{issue.title}. {issue.description}")
+            if emb is not None:
+                issue.embedding = [round(float(x), 5) for x in emb]
+            open_issues = (await s.execute(select(Issue).where(
+                Issue.status != "Resolved", Issue.id != issue.id))).scalars().all()
+            cand = ai_dedup.Candidate(issue.id, 0, issue.lat, issue.lng, issue.category,
+                                      issue.created_at.timestamp(), emb)
+            existing = [ai_dedup.Candidate(o.id, o.cluster_id, o.lat, o.lng, o.category,
+                                           o.created_at.timestamp(), o.embedding) for o in open_issues]
+            cid, dist, _matched = ai_dedup.assign_cluster(cand, existing)
+            issue.cluster_id = cid or issue.id
+            issue.dedupe_distance = dist
+            await _recompute_priority(s, issue)
+            await s.commit()
+            await hub.broadcast({"type": "issue.updated", "issue": await issue_public(s, issue, None)})
+
+            # 2) heavy vision / text verification
+            verdict = await asyncio.to_thread(
+                ai_verify.run, issue.category, issue.title, issue.description, photo_path,
+                issue.lat, issue.lng)
+            issue.verified = verdict.verified
+            issue.verification_method = verdict.method
+            issue.verification_confidence = verdict.confidence
+            issue.detection_count = verdict.detections
+            issue.severity = verdict.severity
+            issue.verification_note = verdict.note
+            issue.evidence = verdict.evidence
+            issue.model_version = verdict.model_version
+            if issue.status in ("Reported", "Verifying"):
+                issue.status = "Verified" if verdict.verified else "Reported"
+            await _recompute_priority(s, issue)
+            await s.commit()
+            await hub.broadcast({"type": "issue.updated", "issue": await issue_public(s, issue, None)})
+    except Exception as e:  # pragma: no cover
+        print(f"[bg process] issue {issue_id}: {e}", flush=True)
+
+
+async def _create_issue(session: AsyncSession, user: User, body: IssueIn, ip: str) -> dict:
+    if body.category not in settings.categories:
+        raise HTTPException(400, f"category must be one of {list(settings.categories)}")
+    if not report_limiter.allow(f"report:{user.id}", window=3600):
+        raise HTTPException(429, "Report limit reached for this hour")
+
+    photo_url, meta = await _decode_and_store(body.photo_base64, "issue")  # only fast I/O on request path
+    photo_path = os.path.join(settings.upload_dir, os.path.basename(photo_url)) if photo_url else None
+    needs_ai = settings.ai_enabled
 
     issue = Issue(
-        title=body.title.strip(), description=body.description.strip(),
-        category=body.category, lat=body.lat, lng=body.lng, address=body.address.strip(),
-        photo_url=photo_url, reporter_id=user.id,
-        verified=verdict["verified"], verification_method=verdict["method"],
-        verification_confidence=verdict["confidence"], detection_count=verdict["detections"],
-        verification_note=verdict["note"],
-        status="Verified" if verdict["verified"] else "Reported",
+        title=body.title.strip(), description=body.description.strip(), category=body.category,
+        lat=body.lat, lng=body.lng, address=body.address.strip(), ward_weight=0.5,
+        photo_url=photo_url,
+        verification_method="pending" if needs_ai else "none",
+        verification_note="AI verification in progress…" if needs_ai else "",
+        model_version=ai_verify._MODEL_VERSION,
+        status="Verifying" if needs_ai else "Reported", reporter_id=user.id,
     )
     session.add(issue)
     await session.flush()
-    issue.cluster_id = cluster_id or issue.id
-
-    cluster_count = await session.scalar(
-        select(func.count()).select_from(Issue).where(Issue.cluster_id == issue.cluster_id)
-    )
-    issue.priority = compute_priority(verdict, issue.upvotes, cluster_count)
+    issue.cluster_id = issue.id
+    issue.priority, issue.priority_score = "medium", 0.4
 
     user.points += 15
+    await audit(session, actor=user, action="issue.create", target=f"issue:{issue.id}", ip=ip, **meta)
     await session.commit()
-
     payload = await issue_public(session, issue, user)
     await hub.broadcast({"type": "issue.created", "issue": payload})
+    if needs_ai:
+        ai_queue.put_nowait((issue.id, photo_path))
     return payload
 
 
+@app.post("/api/issues")
+async def create_issue(body: IssueIn, request: Request, user: User = Depends(get_current_user),
+                       session: AsyncSession = Depends(get_session)):
+    return await _create_issue(session, user, body, client_ip(request))
+
+
 @app.post("/api/issues/{issue_id}/vote")
-async def toggle_vote(
-    issue_id: int, kind: str = "up",
-    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
-):
+async def toggle_vote(issue_id: int, kind: str = "up", user: User = Depends(get_current_user),
+                      session: AsyncSession = Depends(get_session)):
     if kind not in ("up", "adopt"):
-        raise HTTPException(400, "kind must be 'up' or 'adopt'")
+        raise HTTPException(400, "kind must be up or adopt")
     issue = await session.get(Issue, issue_id)
     if not issue:
         raise HTTPException(404, "Issue not found")
-    existing = await session.scalar(
-        select(Vote).where(Vote.issue_id == issue_id, Vote.user_id == user.id, Vote.kind == kind)
-    )
+    existing = await session.scalar(select(Vote).where(
+        Vote.issue_id == issue_id, Vote.user_id == user.id, Vote.kind == kind))
     if existing:
         await session.delete(existing)
         active = False
@@ -611,49 +656,44 @@ async def toggle_vote(
         active = True
         if kind == "up":
             issue.upvotes += 1
-            reporter = await session.get(User, issue.reporter_id)
-            if reporter and reporter.id != user.id:
-                reporter.points += 1
-
-    cluster_count = await session.scalar(
-        select(func.count()).select_from(Issue).where(Issue.cluster_id == issue.cluster_id)
+            rep = await session.get(User, issue.reporter_id)
+            if rep and rep.id != user.id:
+                rep.points += 1
+    cc = await cluster_count(session, issue.cluster_id)
+    rtrust = await reporter_trust(session, issue.reporter_id)
+    pr = ai_priority.compute(
+        vision_conf=issue.verification_confidence if issue.verification_method == "vision" else 0.0,
+        detections=issue.detection_count, severity=issue.severity,
+        text_conf=issue.verification_confidence if issue.verification_method == "text" else 0.0,
+        cluster_size=cc, upvotes=issue.upvotes, reporter_trust=rtrust,
+        ward_weight=issue.ward_weight, category=issue.category,
+        text=f"{issue.title} {issue.description}",
     )
-    issue.priority = compute_priority(
-        {"method": issue.verification_method, "detections": issue.detection_count,
-         "verified": issue.verified, "confidence": issue.verification_confidence},
-        issue.upvotes, cluster_count,
-    )
+    issue.priority, issue.priority_score, issue.priority_explanation = pr.level, pr.score, pr.dict()
     await session.commit()
     await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, issue, None)})
     return {"kind": kind, "active": active, "upvotes": issue.upvotes, "priority": issue.priority}
 
 
 @app.post("/api/issues/{issue_id}/comments")
-async def add_comment(
-    issue_id: int, body: CommentIn,
-    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
-):
+async def add_comment(issue_id: int, body: CommentIn, user: User = Depends(get_current_user),
+                      session: AsyncSession = Depends(get_session)):
     issue = await session.get(Issue, issue_id)
     if not issue:
         raise HTTPException(404, "Issue not found")
-    c = Comment(issue_id=issue_id, user_id=user.id, body=body.body.strip())
-    session.add(c)
+    session.add(Comment(issue_id=issue_id, user_id=user.id, body=body.body.strip()))
     user.points += 3
     await session.commit()
-    await session.refresh(issue)
     return await issue_public(session, issue, user)
 
 
-# ---- Community ---- #
+# ---- community ----
 @app.get("/api/leaderboard")
 async def leaderboard(session: AsyncSession = Depends(get_session)):
-    rows = (await session.execute(
-        select(User).order_by(User.points.desc()).limit(20)
-    )).scalars().all()
-    return [
-        {"rank": n + 1, "name": u.name, "points": u.points, "role": u.role}
-        for n, u in enumerate(rows)
-    ]
+    rows = (await session.execute(select(User).order_by(User.points.desc()).limit(20))).scalars().all()
+    return [{"rank": n + 1, "name": u.name, "points": u.points, "role": u.role,
+             "trust": ai_trust.trust_score(u.reports_valid, u.reports_invalid)}
+            for n, u in enumerate(rows)]
 
 
 @app.get("/api/proof-wall")
@@ -661,118 +701,179 @@ async def proof_wall(session: AsyncSession = Depends(get_session)):
     rows = (await session.execute(
         select(Issue).where(Issue.status == "Resolved").order_by(Issue.resolved_at.desc()).limit(30)
     )).scalars().all()
-    return [
-        {"id": i.id, "title": i.title, "category": i.category, "address": i.address,
-         "before": i.photo_url, "after": i.after_photo_url,
-         "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None}
-        for i in rows
-    ]
+    return [{"id": i.id, "title": i.title, "category": i.category, "address": i.address,
+             "before": i.photo_url, "after": i.after_photo_url,
+             "resolved_at": i.resolved_at.isoformat() if i.resolved_at else None} for i in rows]
 
 
-# ---- Authority ---- #
+# ---- assistant ----
+@app.post("/api/assistant/message")
+async def assistant_message(body: AssistantIn, user: User = Depends(get_current_user),
+                            session: AsyncSession = Depends(get_session), request: Request = None):
+    async def lookup_status(iid: int):
+        i = await session.get(Issue, iid)
+        return None if not i else {
+            "id": i.id, "title": i.title, "status": i.status, "priority": i.priority,
+            "reporter_id": i.reporter_id, "verification_method": i.verification_method,
+            "verification_confidence": i.verification_confidence}
+
+    async def list_mine():
+        rows = (await session.execute(
+            select(Issue).where(Issue.reporter_id == user.id).order_by(Issue.created_at.desc()).limit(10)
+        )).scalars().all()
+        return [{"id": r.id, "title": r.title, "status": r.status} for r in rows]
+
+    async def list_nearby(lat, lng, radius):
+        rows = (await session.execute(select(Issue).where(Issue.status != "Resolved"))).scalars().all()
+        out = []
+        for r in rows:
+            d = ai_dedup.haversine_m(lat, lng, r.lat, r.lng)
+            if d <= radius:
+                out.append({"title": r.title, "priority": r.priority, "distance_m": int(d)})
+        return sorted(out, key=lambda x: x["distance_m"])
+
+    # the assistant is sync + template-only; pre-fetch DB reads, then hand it plain data
+    latlng = (body.lat, body.lng) if body.lat is not None and body.lng is not None else None
+    prefetch_mine = await list_mine()
+    prefetch_nearby = await list_nearby(*latlng, 1500) if latlng else []
+
+    res = assistant.handle(
+        session_id=body.session_id, text=body.text, user_id=user.id,
+        lookup_status=lambda iid: None,   # status-by-id resolved below with a real await
+        list_mine=lambda: prefetch_mine,
+        list_nearby=lambda a, b, c: prefetch_nearby,
+        user_latlng=latlng,
+    )
+    # status-by-id needs a real lookup; handle here if the assistant asked for it
+    if "#" in body.text or any(ch.isdigit() for ch in body.text):
+        digits = "".join(ch for ch in body.text if ch.isdigit())
+        if digits and res.get("intent") == "status":
+            rec = await lookup_status(int(digits))
+            if not rec:
+                res["reply"] = f"No report #{digits} found."
+            elif rec["reporter_id"] != user.id:
+                res["reply"] = "I can only show the status of reports you filed."
+            else:
+                res["reply"] = (f"Report #{rec['id']} — “{rec['title']}”\n"
+                                f"Status: {rec['status']} · priority {rec['priority']}\n"
+                                f"Verified: {rec['verification_method']} "
+                                f"({rec['verification_confidence']:.0%})")
+
+    action = res.get("action")
+    if action and action.get("type") == "create_issue":
+        p = action["payload"]
+        try:
+            issue = await _create_issue(session, user, IssueIn(
+                title=p["title"], description=p.get("description", ""), category=p["category"],
+                lat=p["lat"], lng=p["lng"], address=p.get("address", "")),
+                client_ip(request) if request else "assistant")
+            res["reply"] = (f"Filed as report #{issue['id']} · priority {issue['priority']}. "
+                            f"{issue['verification_note']}")
+            res["action"] = {"type": "issue_created", "issue_id": issue["id"]}
+        except HTTPException as e:
+            res["reply"] = f"Couldn't file that: {e.detail}"
+            res["action"] = None
+    return res
+
+
+# ---- authority ----
 @app.get("/api/authority/queue")
-async def authority_queue(
-    _: User = Depends(require_authority), session: AsyncSession = Depends(get_session),
-):
-    issues = (await session.execute(
-        select(Issue).options(selectinload(Issue.comments), selectinload(Issue.reporter))
-        .where(Issue.status != "Resolved")
-    )).scalars().all()
+async def authority_queue(_: User = Depends(require_authority), session: AsyncSession = Depends(get_session)):
+    issues = (await session.execute(select(Issue).where(Issue.status != "Resolved"))).scalars().all()
     order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    issues.sort(key=lambda i: (order.get(i.priority, 9), -i.upvotes, i.created_at.timestamp()))
+    issues.sort(key=lambda i: (order.get(i.priority, 9), -i.priority_score, -i.upvotes))
     return [await issue_public(session, i, None) for i in issues]
 
 
 @app.get("/api/authority/kpis")
-async def authority_kpis(
-    _: User = Depends(require_authority), session: AsyncSession = Depends(get_session),
-):
-    all_issues = (await session.execute(select(Issue))).scalars().all()
-    total = len(all_issues)
-    resolved = [i for i in all_issues if i.status == "Resolved"]
-    open_issues = [i for i in all_issues if i.status != "Resolved"]
-    by_cat: dict[str, int] = {c: 0 for c in CATEGORIES}
-    by_priority = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-    for i in open_issues:
+async def authority_kpis(_: User = Depends(require_authority), session: AsyncSession = Depends(get_session)):
+    alli = (await session.execute(select(Issue))).scalars().all()
+    total = len(alli)
+    resolved = [i for i in alli if i.status == "Resolved"]
+    openi = [i for i in alli if i.status != "Resolved"]
+    by_cat = {c: 0 for c in settings.categories}
+    by_pri = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for i in openi:
         by_cat[i.category] = by_cat.get(i.category, 0) + 1
-        by_priority[i.priority] = by_priority.get(i.priority, 0) + 1
-    # real avg resolution time from data
-    spans = [
-        (i.resolved_at - i.created_at).total_seconds() / 86400
-        for i in resolved if i.resolved_at
-    ]
-    avg_days = round(sum(spans) / len(spans), 2) if spans else None
-    verified_open = sum(1 for i in open_issues if i.verified)
+        by_pri[i.priority] = by_pri.get(i.priority, 0) + 1
+    spans = [(i.resolved_at - i.created_at).total_seconds() / 86400 for i in resolved if i.resolved_at]
+    vision_ok = sum(1 for i in openi if i.verification_method == "vision" and i.verified)
+    cluster_ids = {i.cluster_id for i in openi}
+    merged = 0
+    for c in cluster_ids:
+        merged += await cluster_count(session, c) - 1
     return {
-        "total": total, "open": len(open_issues), "resolved": len(resolved),
+        "total": total, "open": len(openi), "resolved": len(resolved),
         "resolution_rate": round(len(resolved) / total, 3) if total else 0.0,
-        "avg_resolution_days": avg_days,
-        "verified_open_share": round(verified_open / len(open_issues), 3) if open_issues else 0.0,
-        "by_category": by_cat, "by_priority": by_priority,
-        "clusters": len({i.cluster_id for i in open_issues}),
+        "avg_resolution_days": round(sum(spans) / len(spans), 2) if spans else None,
+        "vision_verified_open": vision_ok,
+        "verified_open_share": round(sum(1 for i in openi if i.verified) / len(openi), 3) if openi else 0.0,
+        "by_category": by_cat, "by_priority": by_pri,
+        "clusters": len(cluster_ids), "duplicates_merged": merged,
     }
 
 
+@app.get("/api/authority/audit")
+async def authority_audit(_: User = Depends(require_authority), session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(select(AuditLog).order_by(AuditLog.ts.desc()).limit(100))).scalars().all()
+    return [{"ts": r.ts.isoformat(), "actor_id": r.actor_id, "actor_role": r.actor_role,
+             "action": r.action, "target": r.target, "ip": r.ip, "meta": r.meta} for r in rows]
+
+
 @app.post("/api/authority/issues/{issue_id}/status")
-async def set_status(
-    issue_id: int, body: StatusIn,
-    _: User = Depends(require_authority), session: AsyncSession = Depends(get_session),
-):
-    valid = ["Reported", "Verified", "Assigned", "In Progress", "Resolved"]
+async def set_status(issue_id: int, body: StatusIn, request: Request,
+                     actor: User = Depends(require_authority), session: AsyncSession = Depends(get_session)):
+    valid = ["Reported", "Verified", "Assigned", "In Progress", "Resolved", "Rejected"]
     if body.status not in valid:
         raise HTTPException(400, f"status must be one of {valid}")
     issue = await session.get(Issue, issue_id)
     if not issue:
         raise HTTPException(404, "Issue not found")
+    prev = issue.status
     issue.status = body.status
+    rep = await session.get(User, issue.reporter_id)
     if body.status == "Resolved":
         issue.resolved_at = utcnow()
-        after = _decode_photo(body.after_photo_base64, "after")
-        if after:
-            issue.after_photo_url = after
-        reporter = await session.get(User, issue.reporter_id)
-        if reporter:
-            reporter.points += 10
+        url, _ = await _decode_and_store(body.after_photo_base64, "after")
+        if url:
+            issue.after_photo_url = url
+        if rep:
+            rep.points += 10
+            rep.reports_valid += 1
+    elif body.status == "Rejected" and rep:
+        rep.reports_invalid += 1
     else:
         issue.resolved_at = None
+    if body.reporter_feedback == "valid" and rep:
+        rep.reports_valid += 1
+    elif body.reporter_feedback == "invalid" and rep:
+        rep.reports_invalid += 1
+    await audit(session, actor=actor, action="issue.status", target=f"issue:{issue_id}",
+                ip=client_ip(request), **{"from": prev, "to": body.status})
     await session.commit()
     await hub.broadcast({"type": "issue.updated", "issue": await issue_public(session, issue, None)})
     return await issue_public(session, issue, None)
 
 
 @app.post("/api/authority/rainfall-twin")
-async def rainfall_twin(
-    body: RainfallIn, _: User = Depends(require_authority),
-    session: AsyncSession = Depends(get_session),
-):
-    """Deterministic digital-twin: projects drainage-complaint volume vs rainfall.
-
-    Honest note: a simple deterministic formula, not a trained hydrological model.
-    """
+async def rainfall_twin(body: RainfallIn, _: User = Depends(require_authority),
+                        session: AsyncSession = Depends(get_session)):
     baseline = await session.scalar(
-        select(func.count()).select_from(Issue).where(Issue.category == "Drainage")
-    ) or 0
+        select(func.count()).select_from(Issue).where(Issue.category == "Flooding")) or 0
     r = body.rainfall_mm
-    # piecewise: light rain ~ linear, heavy rain ~ super-linear runoff
     projected = baseline + 0.12 * r + 0.0009 * (r ** 2)
+    import math
     crews = max(1, math.ceil(projected / 6))
-    if r < 15:
-        level = "low"
-    elif r < 45:
-        level = "moderate"
-    elif r < 90:
-        level = "high"
-    else:
-        level = "severe"
-    return {
-        "rainfall_mm": r, "baseline_drainage_reports": baseline,
-        "projected_reports": round(projected, 1), "recommended_crews": crews,
-        "flood_risk_level": level,
-        "note": "Deterministic formula (baseline + 0.12·mm + 0.0009·mm²); not a trained model.",
-    }
+    level = "low" if r < 15 else "moderate" if r < 45 else "high" if r < 90 else "severe"
+    return {"rainfall_mm": r, "baseline_flooding_reports": baseline,
+            "baseline_drainage_reports": baseline,
+            "projected_reports": round(projected, 1), "recommended_crews": crews,
+            "flood_risk_level": level,
+            "note": "Deterministic surrogate (baseline + 0.12·mm + 0.0009·mm²); "
+                    "upgrade path: train on historical rainfall↔complaint pairs."}
 
 
-# ---- WebSocket ---- #
+# ---- websocket ----
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await hub.connect(ws)
@@ -780,105 +881,22 @@ async def ws_endpoint(ws: WebSocket):
         await ws.send_json({"type": "hello", "clients": len(hub.clients)})
         while True:
             await ws.receive_text()
-    except WebSocketDisconnect:
-        hub.disconnect(ws)
-    except Exception:
-        hub.disconnect(ws)
+    except (WebSocketDisconnect, Exception):
+        hub.drop(ws)
 
 
-# ---- Frontend (served last so /api wins) ---- #
-if os.path.isdir(FRONTEND_DIR):
-    from fastapi.responses import FileResponse
-
-    _index = os.path.join(FRONTEND_DIR, "index.html")
-    _MIME = {
-        ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
-        ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png",
-        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon",
-        ".woff2": "font/woff2", ".woff": "font/woff", ".map": "application/json",
-        ".html": "text/html",
-    }
+# ---- SPA ----
+if os.path.isdir(settings.frontend_dir):
+    _index = os.path.join(settings.frontend_dir, "index.html")
+    _MIME = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
+             ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png",
+             ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon",
+             ".woff2": "font/woff2", ".woff": "font/woff", ".map": "application/json",
+             ".webmanifest": "application/manifest+json", ".html": "text/html"}
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
-        candidate = os.path.join(FRONTEND_DIR, full_path)
-        if full_path and os.path.isfile(candidate):
-            ext = os.path.splitext(candidate)[1].lower()
-            return FileResponse(candidate, media_type=_MIME.get(ext))
+        cand = os.path.join(settings.frontend_dir, full_path)
+        if full_path and os.path.isfile(cand):
+            return FileResponse(cand, media_type=_MIME.get(os.path.splitext(cand)[1].lower()))
         return FileResponse(_index, media_type="text/html")
-
-
-# --------------------------------------------------------------------------- #
-# Seed data
-# --------------------------------------------------------------------------- #
-SEED_ISSUES = [
-    ("Deep pothole cluster on Anna Salai", "Multiple potholes near the bus stop, two-wheelers swerving into traffic.",
-     "Roads", 13.0604, 80.2496, "Anna Salai, near Thousand Lights", "critical", True, "vision", 0.91, 3),
-    ("Pothole on 100 Feet Road", "Large pothole fills with water after rain.",
-     "Roads", 13.0501, 80.2121, "100 Feet Rd, Vadapalani", "high", True, "vision", 0.78, 1),
-    ("Overflowing garbage bin at market", "Bin not cleared for 4 days, stray dogs scattering waste.",
-     "Sanitation", 13.0827, 80.2707, "Mylapore Market", "high", True, "text", 0.72, 2),
-    ("Broken streetlight on service lane", "Entire stretch dark at night, unsafe for pedestrians.",
-     "Utilities", 13.0410, 80.2337, "T. Nagar service lane", "medium", True, "text", 0.66, 1),
-    ("Storm drain clogged near school", "Water stagnates across the road, mosquito breeding.",
-     "Drainage", 13.0731, 80.2609, "Near Santhome School", "high", True, "text", 0.69, 1),
-    ("Damaged park bench and railing", "Sharp broken metal edge, children play here.",
-     "Public Property", 13.0569, 80.2425, "Panagal Park", "medium", False, "text", 0.44, 1),
-    ("Faded zebra crossing", "Crossing near junction almost invisible to drivers.",
-     "Roads", 13.0640, 80.2500, "Gemini Flyover junction", "low", False, "text", 0.30, 1),
-]
-
-SEED_RESOLVED = [
-    ("Graffiti on subway wall removed", "Public Property", 13.0600, 80.2450, "Spencer Plaza subway"),
-    ("Water leak on Habibullah Road fixed", "Utilities", 13.0450, 80.2350, "Habibullah Rd"),
-]
-
-
-async def seed():
-    async with Session() as s:
-        if await s.scalar(select(func.count()).select_from(User)):
-            return
-        authority = User(email="authority@chennai.gov.in", name="GCC Control Room",
-                         password_hash=hash_pw("authority123"), role="authority", points=0)
-        alex = User(email="alex@example.com", name="Alex Kumar",
-                    password_hash=hash_pw("citizen123"), role="citizen", points=0)
-        priya = User(email="priya@example.com", name="Priya R",
-                     password_hash=hash_pw("citizen123"), role="citizen", points=0)
-        ravi = User(email="ravi@example.com", name="Ravi S",
-                    password_hash=hash_pw("citizen123"), role="citizen", points=0)
-        s.add_all([authority, alex, priya, ravi])
-        await s.flush()
-        reporters = [alex, priya, ravi]
-
-        for n, (title, desc, cat, lat, lng, addr, prio, ver, method, conf, det) in enumerate(SEED_ISSUES):
-            rep = reporters[n % 3]
-            i = Issue(
-                title=title, description=desc, category=cat, lat=lat, lng=lng, address=addr,
-                priority=prio, verified=ver, verification_method=method,
-                verification_confidence=conf, detection_count=det,
-                verification_note=("Stage 1 road-scene 88% -> Stage 2 detected "
-                                   f"{det} pothole(s) @ {conf:.0%}") if method == "vision"
-                                  else f"Text classifier signal {conf:.0%} (weaker than vision)",
-                status="Verified" if ver else "Reported",
-                reporter_id=rep.id, upvotes=(n * 3) % 11,
-                created_at=utcnow() - timedelta(hours=6 * n + 2),
-            )
-            s.add(i)
-            await s.flush()
-            i.cluster_id = i.id
-            rep.points += 15 + i.upvotes
-
-        for title, cat, lat, lng, addr in SEED_RESOLVED:
-            i = Issue(
-                title=title, description="Resolved by municipal crew.", category=cat,
-                lat=lat, lng=lng, address=addr, priority="medium", verified=True,
-                verification_method="text", verification_confidence=0.6,
-                status="Resolved", reporter_id=priya.id, upvotes=5,
-                created_at=utcnow() - timedelta(days=4),
-                resolved_at=utcnow() - timedelta(days=1),
-            )
-            s.add(i)
-            await s.flush()
-            i.cluster_id = i.id
-            priya.points += 25
-        await s.commit()
