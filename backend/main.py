@@ -933,10 +933,15 @@ async def _process_in_background(issue_id: int, photo_path: Optional[str]) -> No
 
             # "AI Verified" is only granted with a genuine VISION match that is also
             # plausibly authentic — OR independent corroboration (3+ citizen reports).
+            # Corroboration can only confirm a report whose OWN evidence is at least
+            # plausible: it must never override an explicit scene-gate rejection
+            # (photo doesn't show the claimed problem) or a "needs review" Evidence
+            # Trust verdict — otherwise a pile of unrelated/wrong reports at one
+            # cluster could rubber-stamp a bad photo as "Verified".
             cc = await cluster_count(s, issue.cluster_id)
             vision_ok = (verdict.verified and verdict.method == "vision"
                          and issue.authenticity_score >= settings.authenticity_verify_min)
-            corroborated = cc >= 3 and issue.authenticity_score >= 0.45
+            corroborated = (cc >= 3 and ev.verdict == "trusted" and scene_pass is not False)
             if corroborated and not verdict.verified:
                 issue.verified = True
                 issue.verification_note += (f" Confirmed by corroboration — {cc} independent "

@@ -34,11 +34,24 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-function BottomNav() {
+// Citizens: report, browse, chat, pay. Authority: verify, triage, analyse —
+// no report-creation or citizen-only screens in their nav.
+function BottomNav({ isAuthority }) {
   const tab = ({ isActive }) =>
     `flex flex-col items-center justify-center gap-1 text-[10px] font-semibold tracking-wide transition-all active:scale-90 ${
       isActive ? "text-primary" : "text-on-variant/55"
     }`;
+  if (isAuthority) {
+    return (
+      <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto z-40 glass-strong flex justify-around items-end px-2 pt-3
+                      rounded-t-[1.4rem] border-t border-on-surface/[0.06]"
+           style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)" }}>
+        <NavLink to="/" end className={tab}>{({ isActive }) => (<><Icon name="monitoring" fill={isActive} />Dashboard</>)}</NavLink>
+        <NavLink to="/map" className={tab}>{({ isActive }) => (<><Icon name="explore" fill={isActive} />Map</>)}</NavLink>
+        <NavLink to="/profile" className={tab}>{({ isActive }) => (<><Icon name="person" fill={isActive} />Profile</>)}</NavLink>
+      </nav>
+    );
+  }
   return (
     <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto z-40 glass-strong flex justify-around items-end px-2 pt-3
                     rounded-t-[1.4rem] border-t border-on-surface/[0.06]"
@@ -60,6 +73,7 @@ function BottomNav() {
 
 function Shell({ children }) {
   const { user, logout } = useAuth();
+  const isAuthority = user?.role === "authority";
   return (
     <div className="min-h-screen max-w-[480px] mx-auto relative bg-surface"
          style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
@@ -74,19 +88,15 @@ function Shell({ children }) {
               <span className="text-[17px] font-bold font-headline text-on-surface tracking-tight">
 Civi<span className="text-primary">Trace</span> AI
               </span>
-              {user?.role === "authority" &&
+              {isAuthority &&
                 <span className="block text-[9px] font-bold uppercase tracking-[0.2em] text-primary mt-0.5">Authority</span>}
             </div>
           </Link>
           <div className="flex items-center gap-3">
-            <Link to="/emergency" title="Emergency" className="text-error active:scale-90 transition-transform">
-              <Icon name="e911_emergency" fill />
-            </Link>
-            {user?.role === "authority" && (
-              <NavLink to="/authority" className={({ isActive }) =>
-                `text-xs font-bold px-3 py-1.5 rounded-full ${isActive ? "bg-primary text-white" : "bg-primary/10 text-primary"}`}>
-                Hub
-              </NavLink>
+            {!isAuthority && (
+              <Link to="/emergency" title="Emergency" className="text-error active:scale-90 transition-transform">
+                <Icon name="e911_emergency" fill />
+              </Link>
             )}
             <button onClick={logout} title="Log out" className="text-on-variant active:scale-90 transition-transform">
               <Icon name="logout" />
@@ -98,9 +108,16 @@ Civi<span className="text-primary">Trace</span> AI
           <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
-      <BottomNav />
+      <BottomNav isAuthority={isAuthority} />
     </div>
   );
+}
+
+// Citizen-only screens (reporting, chat assistant, SOS, paid civic services)
+// are off-limits for authority accounts — they verify and resolve, not report.
+function CitizenOnly({ children }) {
+  const { user } = useAuth();
+  return user.role === "authority" ? <Navigate to="/" replace /> : children;
 }
 
 export default function App() {
@@ -110,19 +127,20 @@ export default function App() {
     return <div className="min-h-screen grid place-items-center"><div className="mesh-bg" /><Spinner label="Starting CiviTrace AI…" /></div>;
   }
   if (!user) return <Login />;
+  const isAuthority = user.role === "authority";
   return (
     <Shell>
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={isAuthority ? <Authority /> : <Home />} />
         <Route path="/map" element={<MapView />} />
-        <Route path="/report" element={<Report />} />
-        <Route path="/assistant" element={<Assistant />} />
-        <Route path="/emergency" element={<Emergency />} />
-        <Route path="/services" element={<Payments />} />
-        <Route path="/payments" element={<Payments />} />
+        <Route path="/report" element={<CitizenOnly><Report /></CitizenOnly>} />
+        <Route path="/assistant" element={<CitizenOnly><Assistant /></CitizenOnly>} />
+        <Route path="/emergency" element={<CitizenOnly><Emergency /></CitizenOnly>} />
+        <Route path="/services" element={<CitizenOnly><Payments /></CitizenOnly>} />
+        <Route path="/payments" element={<CitizenOnly><Payments /></CitizenOnly>} />
         <Route path="/issues/:id" element={<IssueDetail />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/authority" element={user.role === "authority" ? <Authority /> : <Navigate to="/" replace />} />
+        <Route path="/authority" element={isAuthority ? <Authority /> : <Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Shell>

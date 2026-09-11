@@ -459,23 +459,45 @@ export function GeoInput({ value, onChange, onPick, near, placeholder = "Search 
 }
 
 // Language picker — sets the speech-recognition language + a few UI strings.
+// Explicit, always-visible language picker (a real dropdown list, not a bare
+// native <select> — those render inconsistently across mobile browsers/
+// WebViews, which was why the chosen language didn't visibly update).
 export function LangPicker({ compact }) {
   const cfg = useConfig();
   const [lang, setLang] = useLang();
+  const [open, setOpen] = useState(false);
+  const box = useRef();
   const langs = cfg?.languages || [{ code: "en-IN", label: "English", native: "English" }];
   const cur = langs.find((l) => l.code === lang) || langs[0];
+
+  useEffect(() => {
+    const h = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
   return (
-    <label className={`inline-flex items-center gap-1.5 ${compact ? "" : "bg-white card-line rounded-full px-3 py-2"}`}>
-      <Icon name="translate" className="text-primary text-base" />
-      <select value={lang} onChange={(e) => setLang(e.target.value)}
-        className="bg-transparent border-none text-sm font-semibold outline-none focus:ring-0 pr-1"
-        aria-label="Language">
-        {langs.map((l) => (
-          <option key={l.code} value={l.code}>{l.native}{l.native !== l.label ? ` · ${l.label}` : ""}</option>
-        ))}
-      </select>
-      {compact && cur && <span className="sr-only">{cur.label}</span>}
-    </label>
+    <div ref={box} className="relative">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center gap-1.5 active:scale-95 transition-transform ${
+          compact ? "text-sm font-semibold" : "bg-white card-line rounded-full px-3 py-2 text-sm font-semibold"}`}>
+        <Icon name="translate" className="text-primary text-base" />
+        <span>{cur.native}</span>
+        <Icon name={open ? "expand_less" : "expand_more"} className="text-slate-400 text-base" />
+      </button>
+      {open && (
+        <div className="absolute z-[900] right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl card-line overflow-hidden">
+          {langs.map((l) => (
+            <button key={l.code} type="button" onClick={() => { setLang(l.code); setOpen(false); }}
+              className={`w-full text-left px-4 py-2.5 flex items-center justify-between text-sm ${
+                l.code === lang ? "bg-primary/10 text-primary font-bold" : "text-on-surface"}`}>
+              <span>{l.native}{l.native !== l.label ? <span className="text-on-variant font-normal"> · {l.label}</span> : null}</span>
+              {l.code === lang && <Icon name="check" className="text-base" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -485,7 +507,15 @@ export function VoiceButton({ onResult, onInterim, label = "Speak", className = 
   const [lang] = useLang();
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(true);
+  const [error, setError] = useState("");
   const recRef = useRef(null);
+  // keep the latest callbacks in refs so recreating the recogniser on every
+  // parent re-render (which aborted it mid-listen — the actual cause of
+  // "voice doesn't work") is no longer needed.
+  const onResultRef = useRef(onResult);
+  const onInterimRef = useRef(onInterim);
+  onResultRef.current = onResult;
+  onInterimRef.current = onInterim;
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -501,14 +531,21 @@ export function VoiceButton({ onResult, onInterim, label = "Speak", className = 
         const tr = e.results[i][0].transcript;
         if (e.results[i].isFinal) finalT += tr; else interimT += tr;
       }
-      if (interimT) onInterim?.(interimT);
-      if (finalT) onResult?.(finalT.trim());
+      if (interimT) onInterimRef.current?.(interimT);
+      if (finalT) onResultRef.current?.(finalT.trim());
     };
-    r.onerror = () => setListening(false);
+    r.onerror = (e) => {
+      setListening(false);
+      setError(
+        e.error === "not-allowed" || e.error === "service-not-allowed" ? "Microphone permission denied."
+          : e.error === "no-speech" ? "Didn't catch that — try again."
+          : e.error === "network" ? "Voice recognition needs an internet connection."
+          : "Voice input had a problem — please type instead.");
+    };
     r.onend = () => setListening(false);
     recRef.current = r;
     return () => { try { r.abort(); } catch {} };
-  }, [lang, onResult, onInterim]);
+  }, [lang]);   // <- only lang; onResult/onInterim are read via refs above
 
   if (!supported) {
     return (
@@ -520,18 +557,22 @@ export function VoiceButton({ onResult, onInterim, label = "Speak", className = 
   const toggle = () => {
     const r = recRef.current;
     if (!r) return;
+    setError("");
     if (listening) { try { r.stop(); } catch {} setListening(false); return; }
-    try { r.lang = getLang(); r.start(); setListening(true); } catch {}
+    try { r.start(); setListening(true); } catch { setListening(false); }
   };
   return (
-    <button type="button" onClick={toggle}
-      className={className || `flex items-center gap-2 px-4 py-2.5 rounded-full font-bold text-sm transition-colors ${
-        listening ? "bg-error text-white" : "bg-primary text-white"}`}>
-      <span className={`relative flex items-center justify-center ${listening ? "sos-pulse rounded-full" : ""}`}>
-        <Icon name={listening ? "graphic_eq" : "mic"} className="text-lg" fill />
-      </span>
-      {listening ? "Listening…" : label}
-    </button>
+    <div>
+      <button type="button" onClick={toggle}
+        className={className || `flex items-center gap-2 px-4 py-2.5 rounded-full font-bold text-sm transition-colors ${
+          listening ? "bg-error text-white" : "bg-primary text-white"}`}>
+        <span className={`relative flex items-center justify-center ${listening ? "sos-pulse rounded-full" : ""}`}>
+          <Icon name={listening ? "graphic_eq" : "mic"} className="text-lg" fill />
+        </span>
+        {listening ? "Listening…" : label}
+      </button>
+      {error && <p className="text-xs text-error mt-1.5">{error}</p>}
+    </div>
   );
 }
 

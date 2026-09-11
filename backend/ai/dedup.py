@@ -58,7 +58,16 @@ class Candidate:
 
 
 def dissimilarity(new: Candidate, other: Candidate) -> float:
-    geo = min(1.0, haversine_m(new.lat, new.lng, other.lat, other.lng) / settings.dedupe_radius_m)
+    dist_m = haversine_m(new.lat, new.lng, other.lat, other.lng)
+    # HARD geographic gate: beyond this, two reports can never be "the same
+    # real-world problem" no matter how similar the wording is. Without this,
+    # `geo` saturates at 1.0 past `dedupe_radius_m` and a strong text match
+    # alone (weight 0.30) can pull the weighted sum back under the 1.0
+    # clustering threshold even for reports hundreds of km apart.
+    hard_cutoff_m = settings.dedupe_radius_m * 3
+    if dist_m > hard_cutoff_m:
+        return 2.0
+    geo = min(1.0, dist_m / settings.dedupe_radius_m)
     txt = 1.0 - _cos(new.embedding, other.embedding)
     cat = 0.0 if new.category == other.category else 1.0
     tim = min(1.0, abs(new.created_ts - other.created_ts) / (14 * 86400))
