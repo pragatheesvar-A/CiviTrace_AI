@@ -40,7 +40,7 @@ export default function Home() {
 
   return (
     <div className="space-y-8">
-      <section>
+      <section className="text-center">
         <h1 className="text-[2.5rem] leading-[1.05] font-bold tracking-tight">
           Hi, {user.name.split(" ")[0]} <span className="inline-block">👋</span>
         </h1>
