@@ -25,9 +25,17 @@ export default function Home() {
   const scoped = issues.filter(inArea);
   const open = scoped.filter((i) => !["Resolved", "Verified Closed"].includes(i.status));
   const resolved = scoped.filter((i) => ["Resolved", "Verified Closed"].includes(i.status));
-  const filtered = open.filter(
-    (i) => !q || i.title.toLowerCase().includes(q.toLowerCase()) || (i.address || "").toLowerCase().includes(q.toLowerCase())
-  );
+
+  // Typing a search term looks across ALL issues, not just the chosen area —
+  // "search" means find something specific, wherever it is; only the default,
+  // no-query view is scoped to the area you picked.
+  const query = q.trim().toLowerCase();
+  const searching = query.length > 0;
+  const matches = (i) => [i.title, i.address, i.category, i.description]
+    .some((f) => (f || "").toLowerCase().includes(query));
+  const filtered = searching
+    ? issues.filter((i) => !["Resolved", "Verified Closed"].includes(i.status) && matches(i))
+    : open;
   const areaName = area ? area.label.split(",")[0] : null;
 
   return (
@@ -71,12 +79,21 @@ export default function Home() {
 
       <section className="space-y-4">
         <div className="flex justify-between items-end">
-          <h2 className="text-2xl font-bold">{areaName ? `${areaName} Feed` : "Nearby Issues"}</h2>
-          <Link to="/map" className="text-primary font-bold text-sm">Map</Link>
+          <h2 className="text-2xl font-bold">
+            {searching ? `Results for "${q.trim()}"` : areaName ? `${areaName} Feed` : "Nearby Issues"}
+          </h2>
+          {searching
+            ? <button onClick={() => setQ("")} className="text-primary font-bold text-sm">Clear</button>
+            : <Link to="/map" className="text-primary font-bold text-sm">Map</Link>}
         </div>
+        {searching && (
+          <p className="text-xs text-on-variant -mt-2">Searching all issues, not just {areaName || "your area"}.</p>
+        )}
         {filtered.length === 0 && (
           <p className="text-on-variant text-sm">
-            {area
+            {searching
+              ? "No issues match that search anywhere."
+              : area
               ? `No open issues reported in ${areaName} yet. Spotted one? Tap Report Issue.`
               : "No matching issues."}
           </p>
