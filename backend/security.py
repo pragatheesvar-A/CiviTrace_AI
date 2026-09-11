@@ -64,6 +64,9 @@ class TokenBucketLimiter:
 
 global_limiter = TokenBucketLimiter(settings.rate_limit_per_min)
 report_limiter = TokenBucketLimiter(settings.report_rate_limit_per_hour)
+# live-camera AI preview frames: generous per-minute cap (the client also
+# self-throttles — it only sends the next frame once the previous one returns)
+preview_limiter = TokenBucketLimiter(90)
 
 
 # --------------------------------------------------------------------------- #

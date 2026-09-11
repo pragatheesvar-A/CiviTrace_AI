@@ -10,6 +10,7 @@ import {
   EditorialTitle, GeoInput, Stepper, NearbyList, VoiceButton, LangPicker,
 } from "../ui.jsx";
 import { t } from "../i18n.jsx";
+import LiveCamera from "../camera.jsx";
 
 const CATS = ["Roads", "Water", "Waste", "Electricity", "Safety", "Flooding", "Traffic"];
 const VISION = { Roads: "2-stage CLIP → YOLO pothole pipeline", Flooding: "photo + live rainfall at this GPS point", Traffic: "CLIP signal / junction classifier" };
@@ -35,7 +36,14 @@ export default function Report() {
   const [heard, setHeard] = useState("");        // interim transcript
   const [understood, setUnderstood] = useState(null); // parsed NLU result
   const [parsing, setParsing] = useState(false);
+  const [camOpen, setCamOpen] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+
+  function onLiveCapture(dataUrl, previewUrl) {
+    setPhoto(dataUrl);
+    setPreview((old) => { if (old) URL.revokeObjectURL(old); return previewUrl; });
+    setCamOpen(false);
+  }
 
   async function onVoice(text) {
     setHeard(text);
@@ -230,26 +238,36 @@ export default function Report() {
       </section>
 
       <section className="relative">
-        <button type="button" onClick={() => fileRef.current?.click()}
+        <button type="button" onClick={() => (preview ? fileRef.current?.click() : setCamOpen(true))}
           className="w-full aspect-[4/3] rounded-3xl glass border border-white/50 flex flex-col items-center justify-center active:scale-[0.99] transition-all overflow-hidden">
           {preview
             ? <img src={preview} alt="" className="w-full h-full object-cover" />
             : (
               <span className="flex flex-col items-center gap-3 text-primary">
-                <span className="p-5 rounded-full bg-primary/10"><Icon name="add_a_photo" className="text-4xl" fill /></span>
+                <span className="p-5 rounded-full bg-primary/10"><Icon name="photo_camera" className="text-4xl" fill /></span>
                 <span className="font-semibold tracking-widest uppercase text-xs">{t("Add a photo of the problem")}</span>
-                <span className="text-[11px] text-on-variant normal-case tracking-normal">A clear photo lets the AI verify it automatically</span>
+                <span className="text-[11px] text-on-variant normal-case tracking-normal">
+                  {VISION[f.category] ? "Live AI preview while you frame the shot" : "A clear photo helps verify the report"}
+                </span>
               </span>
             )}
         </button>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pickPhoto} />
-        {preview && (
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickPhoto} />
+        {preview ? (
           <button type="button" onClick={() => { setPhoto(null); setPreview(null); }}
             className="absolute top-3 right-3 w-9 h-9 rounded-full glass-strong flex items-center justify-center text-error active:scale-90">
             <Icon name="delete" className="text-lg" />
           </button>
+        ) : (
+          <button type="button" onClick={() => fileRef.current?.click()}
+            className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-2 rounded-full glass-strong text-primary text-xs font-bold">
+            <Icon name="photo_library" className="text-sm" /> Gallery
+          </button>
         )}
       </section>
+      {camOpen && (
+        <LiveCamera category={f.category} onCapture={onLiveCapture} onClose={() => setCamOpen(false)} />
+      )}
 
       <section>
         <SectionLabel>{t("What kind of problem?")}</SectionLabel>

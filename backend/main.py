@@ -12,6 +12,7 @@ import asyncio
 import base64
 import io
 import json
+import tempfile
 import os
 import time
 from contextlib import asynccontextmanager
@@ -40,7 +41,8 @@ from config import settings
 from models import (AuditLog, Base, Comment, EvidenceCheck, HumanReview, Issue, OtpCode,
                     PaymentOrder, PaymentTransaction, RefreshToken, ResolutionVerification,
                     User, Vote, utcnow)
-from security import (SecurityHeadersMiddleware, global_limiter, report_limiter, sanitize_image)
+from security import (SecurityHeadersMiddleware, global_limiter, report_limiter,
+                      preview_limiter, sanitize_image)
 
 engine = create_async_engine(settings.db_url, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -335,6 +337,11 @@ class ParseIn(BaseModel):
     text: str = Field(min_length=2, max_length=2000)
     lat: Optional[float] = None
     lng: Optional[float] = None
+
+
+class VisionPreviewIn(BaseModel):
+    image_base64: str
+    category: str = "Roads"
 
 
 # --------------------------------------------------------------------------- WS hub
@@ -1006,6 +1013,55 @@ async def _create_issue(session: AsyncSession, user: User, body: IssueIn, ip: st
     if needs_ai:
         ai_queue.put_nowait((issue.id, photo_path))
     return payload
+
+
+@app.post("/api/vision/preview")
+async def vision_preview(body: VisionPreviewIn, request: Request, user: User = Depends(get_current_user)):
+    """Live-camera AI preview: runs the SAME scene gate + pothole detector as
+    the real pipeline on one frame from the live camera feed, so the citizen
+    sees genuine bounding boxes + confidence while framing the shot — not a
+    canned animation. Nothing is stored or verified here; the frame is
+    discarded immediately after inference, and the authoritative verification
+    still runs on the actual submitted photo after the report is filed."""
+    if not preview_limiter.allow(f"preview:{user.id}"):
+        raise HTTPException(429, "Slow down a little")
+    b64 = body.image_base64
+    if b64.strip().startswith("data:") and "," in b64:
+        b64 = b64.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(400, "Bad image encoding")
+    if len(raw) > 6 * 1024 * 1024:
+        raise HTTPException(413, "Frame too large")
+
+    cat = body.category if body.category in settings.vision_categories else "Roads"
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(raw)
+        scene = await asyncio.to_thread(ai_verify.scene_gate.check, path, cat)
+        detections: list[dict] = []
+        detector_kind = "none"
+        if scene.is_scene and cat == "Roads":
+            det = await asyncio.to_thread(ai_verify.detector.detect, path)
+            detector_kind = det.model_kind
+            detections = [{"box": d.box, "confidence": d.confidence, "label": "pothole"} for d in det.detections]
+        return {
+            "category": cat,
+            "scene": {"is_scene": scene.is_scene, "score": scene.score, "method": scene.method},
+            "detections": detections,
+            "detector_available": detector_kind == "pothole",
+            "model_version": ai_verify._MODEL_VERSION,
+            "note": "Live preview from the real scene + detector models — indicative only; "
+                    "full verification (and Evidence Trust) runs after you submit.",
+        }
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 @app.post("/api/report/parse")
